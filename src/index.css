@@ -300,6 +300,36 @@ body {
   background: #9ca3af;
 }
 
+.similarity-badge.tier-excellent {
+  background: linear-gradient(135deg, #10b981, #059669);
+}
+
+.similarity-badge.tier-good {
+  background: linear-gradient(135deg, #667eea, #4f46e5);
+}
+
+.similarity-badge.tier-fair {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+}
+
+.similarity-badge.tier-low {
+  background: linear-gradient(135deg, #f87171, #dc2626);
+}
+
+.similarity-badge.tier-poor {
+  background: #9ca3af;
+}
+
+.match-card.is-low {
+  background: #fafbfc;
+  opacity: 0.85;
+}
+
+.match-card.is-poor {
+  background: #fafbfc;
+  opacity: 0.6;
+}
+
 /* Buttons */
 .btn-primary {
   background: linear-gradient(135deg, #667eea, #764ba2);
@@ -590,14 +620,16 @@ input[type="range"]::-webkit-slider-thumb {
 .order-list {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.5rem;
 }
 
 .order-item {
   background: white;
   border: 1px solid #e5e7eb;
+  border-left: 4px solid #6366f1;
   border-radius: 12px;
   overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 .order-item-header {

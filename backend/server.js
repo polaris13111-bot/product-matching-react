@@ -283,14 +283,13 @@ app.post('/api/update-match', async (req, res) => {
 
     const headers = headerRes.data.values ? headerRes.data.values[0] : [];
 
-    // Define the columns we want to write
     const columnsToWrite = {
       '매칭상품_상품명': matchedData.매칭상품_상품명 || '',
-      '매입': matchedData.매입 || '',
-      '매출': matchedData.매출 || '',
+      '매칭_매입': matchedData.매입 || '',
+      '매칭_매출': matchedData.매출 || '',
       '업체': matchedData.업체 || '',
-      '탭': matchedData.탭 || '',
-      '옵션': matchedData.옵션 || '',
+      '매칭_탭': matchedData.탭 || '',
+      '매칭_옵션': matchedData.옵션 || '',
       '매칭방식': matchedData.매칭방식 || ''
     };
 
@@ -365,7 +364,7 @@ app.post('/api/batch-update-match', async (req, res) => {
     });
 
     const headers = headerRes.data.values ? headerRes.data.values[0] : [];
-    const columnNames = ['매칭상품_상품명', '매입', '매출', '업체', '탭', '옵션', '매칭방식'];
+    const columnNames = ['매칭상품_상품명', '매칭_매입', '매칭_매출', '업체', '매칭_탭', '매칭_옵션', '매칭방식'];
 
     let needsHeaderUpdate = false;
     const colIndices = {};
@@ -389,13 +388,21 @@ app.post('/api/batch-update-match', async (req, res) => {
       });
     }
 
+    const aliasMap = {
+      '매칭_매입': '매입',
+      '매칭_매출': '매출',
+      '매칭_탭': '탭',
+      '매칭_옵션': '옵션'
+    };
+
     const updates = [];
     for (const { rowIndex, matchedData } of matches) {
       for (const colName of columnNames) {
         const colLetter = columnIndexToLetter(colIndices[colName]);
+        const value = matchedData[colName] ?? matchedData[aliasMap[colName]] ?? '';
         updates.push({
           range: `시트1!${colLetter}${rowIndex}`,
-          values: [[matchedData[colName] || '']]
+          values: [[value]]
         });
       }
     }

@@ -8,7 +8,12 @@ function MatchCard({ match, index, spreadsheetId, rowIndex, orderName, onMatched
   const [matched, setMatched] = useState(false);
 
   const similarity = match.유사도 || 0;
-  const badgeClass = similarity >= 90 ? 'high' : similarity >= 70 ? 'medium' : 'low';
+  const badgeClass =
+    similarity >= 90 ? 'tier-excellent'
+    : similarity >= 70 ? 'tier-good'
+    : similarity >= 50 ? 'tier-fair'
+    : similarity >= 30 ? 'tier-low'
+    : 'tier-poor';
 
   const handleMatch = async () => {
     if (!spreadsheetId || !rowIndex) {

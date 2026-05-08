@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import MatchCard from './MatchCard';
 
 const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:5003';
 
-function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold, topN, onRefresh }) {
+function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold, topN, refreshKey, onRefresh }) {
   const [orderMatches, setOrderMatches] = useState({}); // { rowIndex: [matches] }
   const [bulkLoading, setBulkLoading] = useState(false);
   const [autoApplied, setAutoApplied] = useState({}); // { rowIndex: matchInfo } — 100% auto-matched
@@ -14,8 +14,6 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
   const [manualSearch, setManualSearch] = useState('');
   const [manualMatches, setManualMatches] = useState([]);
   const [manualLoading, setManualLoading] = useState(false);
-
-  const lastBulkKeyRef = useRef(null);
 
   const runBulkSearch = async () => {
     if (!excelData || unmatchedOrders.length === 0) return;
@@ -73,12 +71,9 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
 
   useEffect(() => {
     if (!excelData || unmatchedOrders.length === 0) return;
-    const key = `${Object.keys(excelData).length}|${unmatchedOrders.map(o => o._rowIndex).join(',')}`;
-    if (lastBulkKeyRef.current === key) return;
-    lastBulkKeyRef.current = key;
     runBulkSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [excelData, unmatchedOrders]);
+  }, [excelData, unmatchedOrders, refreshKey]);
 
   // Run auto-match for all unmatched orders
   const runAutoMatch = async () => {

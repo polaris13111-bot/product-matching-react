@@ -16,7 +16,8 @@ function App() {
   const [spreadsheetId, setSpreadsheetId] = useState(null);
   const [spreadsheetUrl, setSpreadsheetUrl] = useState('');
   const [threshold, setThreshold] = useState(70);
-  const [topN, setTopN] = useState(5);
+  const [topN, setTopN] = useState(3);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Load Excel from Drive on startup
   useEffect(() => {
@@ -94,6 +95,7 @@ function App() {
   }, []);
 
   const handleRefresh = () => {
+    setRefreshKey(k => k + 1);
     loadUnmatchedOrders();
   };
 
@@ -205,6 +207,7 @@ function App() {
               spreadsheetId={spreadsheetId}
               threshold={threshold}
               topN={topN}
+              refreshKey={refreshKey}
               onRefresh={handleRefresh}
             />
           ) : (
