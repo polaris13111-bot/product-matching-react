@@ -469,6 +469,34 @@ app.post('/api/fix-all-phones', async (req, res) => {
       .map(name => headers.indexOf(name))
       .filter(idx => idx >= 0);
 
+    // Force TEXT format on those columns so future entries preserve leading 0
+    if (colIndices.length > 0) {
+      try {
+        const meta = await sheetsClient.spreadsheets.get({ spreadsheetId });
+        const sheet = meta.data.sheets.find(s => s.properties.title === '시트1');
+        if (sheet) {
+          const sheetId = sheet.properties.sheetId;
+          const formatRequests = colIndices.map(colIdx => ({
+            repeatCell: {
+              range: {
+                sheetId,
+                startColumnIndex: colIdx,
+                endColumnIndex: colIdx + 1
+              },
+              cell: { userEnteredFormat: { numberFormat: { type: 'TEXT' } } },
+              fields: 'userEnteredFormat.numberFormat'
+            }
+          }));
+          await sheetsClient.spreadsheets.batchUpdate({
+            spreadsheetId,
+            requestBody: { requests: formatRequests }
+          });
+        }
+      } catch (formatErr) {
+        console.error('Phone column format error:', formatErr.message);
+      }
+    }
+
     const updates = [];
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
