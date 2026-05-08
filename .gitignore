@@ -28,6 +28,7 @@ backend/node_modules/
 # Google API 키 (절대 커밋 금지!)
 backend/config/
 *.json.key
+github-deployer-key.json
 
 # 업로드 임시 파일
 backend/uploads/*

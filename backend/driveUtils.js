@@ -4,11 +4,16 @@ const path = require('path');
 const XLSX = require('xlsx');
 
 async function getAuthClient() {
-  const configPath = path.join(__dirname, 'config', 'Google Sheets API.json');
-  if (!fs.existsSync(configPath)) {
-    throw new Error('Google Sheets API JSON file not found');
+  let credentials;
+  if (process.env.GOOGLE_CREDENTIALS_JSON) {
+    credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+  } else {
+    const configPath = path.join(__dirname, 'config', 'Google Sheets API.json');
+    if (!fs.existsSync(configPath)) {
+      throw new Error('Google Sheets API JSON file not found');
+    }
+    credentials = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   }
-  const credentials = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   const auth = new google.auth.GoogleAuth({
     credentials,
     scopes: [

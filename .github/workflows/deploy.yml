@@ -3,12 +3,14 @@ name: Deploy to Cloud Run
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 env:
-  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  PROJECT_ID: stable-vault-473902-b0
   REGION: asia-northeast3
-  SERVICE: product-matching
-  IMAGE: asia-northeast3-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/product-matching/app
+  SERVICE: product-matcher
+  AR_REPO: product-matcher
+  RUNTIME_SA: id-648@stable-vault-473902-b0.iam.gserviceaccount.com
 
 jobs:
   deploy:
@@ -23,19 +25,24 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Configure Docker
-        run: gcloud auth configure-docker asia-northeast3-docker.pkg.dev --quiet
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
       - name: Build and Push Image
         run: |
-          docker build -t ${{ env.IMAGE }}:${{ github.sha }} -t ${{ env.IMAGE }}:latest .
-          docker push ${{ env.IMAGE }}:${{ github.sha }}
-          docker push ${{ env.IMAGE }}:latest
+          IMAGE=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.SERVICE }}
+          docker build -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
+          docker push $IMAGE:${{ github.sha }}
+          docker push $IMAGE:latest
+          echo "IMAGE_URI=$IMAGE:${{ github.sha }}" >> $GITHUB_ENV
 
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy ${{ env.SERVICE }} \
-            --image ${{ env.IMAGE }}:${{ github.sha }} \
+            --image $IMAGE_URI \
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
@@ -43,6 +50,7 @@ jobs:
             --memory 512Mi \
             --cpu 1 \
             --min-instances 0 \
-            --max-instances 3 \
-            --set-secrets GOOGLE_CREDENTIALS_JSON=google-credentials:latest \
+            --max-instances 20 \
+            --service-account ${{ env.RUNTIME_SA }} \
+            --set-secrets GOOGLE_CREDENTIALS_JSON=gcp-service-account:latest \
             --quiet
