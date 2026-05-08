@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import MatchCard from './MatchCard';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5003';
+const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:5003';
 
 function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold, topN, onRefresh }) {
   const [expandedOrder, setExpandedOrder] = useState(null);

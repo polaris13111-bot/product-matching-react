@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5003';
+const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:5003';
 
 function SpreadsheetViewer({ spreadsheetId }) {
   const [selectedTab, setSelectedTab] = useState('sheet1');

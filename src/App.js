@@ -5,7 +5,7 @@ import FileUpload from './components/FileUpload';
 import ProductMatching from './components/ProductMatching';
 import SpreadsheetViewer from './components/SpreadsheetViewer';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5003';
+const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:5003';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('matching');
