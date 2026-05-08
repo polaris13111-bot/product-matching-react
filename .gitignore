@@ -21,3 +21,14 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Backend
+backend/node_modules/
+
+# Google API 키 (절대 커밋 금지!)
+backend/config/
+*.json.key
+
+# 업로드 임시 파일
+backend/uploads/*
+!backend/uploads/.gitkeep

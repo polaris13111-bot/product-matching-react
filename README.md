@@ -1,6 +1,92 @@
-# Getting Started with Create React App
+# 상품 매칭 프로그램 (React Version)
+
+Google Sheets와 Excel 파일을 연동하여 상품명을 자동으로 매칭하는 React 기반 웹 애플리케이션입니다.
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+
+## 🚀 기술 스택
+
+### Frontend
+- **React** 18+ - UI 프레임워크
+- **Axios** - HTTP 클라이언트
+- **Tailwind CSS** - 스타일링
+- **XLSX** - Excel 파일 처리
+
+### Backend
+- **Express.js** - Node.js 웹 프레임워크
+- **Google Sheets API** - 스프레드시트 연동
+- **XLSX** - Excel 파일 처리
+- **Fuse.js** - 상품 매칭 알고리즘
+
+## 📋 주요 기능
+
+- ✅ 상품명 100% 일치 자동 매칭
+- ✅ 모델명 100% 포함 자동 매칭
+- ✅ Fuzzy matching으로 유사 상품 추천
+- ✅ Excel 파일 업로드 및 다중 탭 지원
+- ✅ Google Sheets 실시간 연동
+- ✅ 이미지 URL 미리보기
+
+## 🛠️ 설치 및 실행
+
+### 1. 의존성 설치
+
+```bash
+# Frontend
+npm install
+
+# Backend
+cd backend
+npm install
+```
+
+### 2. Google Sheets API 설정
+
+1. Google Cloud Console에서 프로젝트 생성
+2. Google Sheets API 활성화
+3. 서비스 계정 생성 및 JSON 키 다운로드
+4. `backend/config/` 폴더에 `Google Sheets API.json` 파일로 저장
+
+### 3. 애플리케이션 실행
+
+```bash
+# Backend 시작 (터미널 1)
+cd backend
+npm start
+
+# Frontend 시작 (터미널 2)
+npm start
+```
+
+- Backend: http://localhost:5000
+- Frontend: http://localhost:3000
+
+## 📁 프로젝트 구조
+
+```
+product-matching-react/
+├── src/
+│   ├── components/        # React 컴포넌트
+│   │   ├── FileUpload.js
+│   │   ├── ProductMatching.js
+│   │   ├── MatchCard.js
+│   │   └── SpreadsheetViewer.js
+│   ├── App.js
+│   └── index.css
+├── backend/
+│   ├── config/            # Google API 설정
+│   ├── server.js          # Express 서버
+│   ├── matcher.js         # 매칭 로직
+│   └── package.json
+└── README.md
+```
+
+## 🎯 사용 방법
+
+1. 엑셀 파일 업로드 (왼쪽 사이드바)
+2. 주문 상품명 입력
+3. "유사 상품 검색" 또는 "자동 매칭" 클릭
+4. 결과 확인 및 "매칭하기" 버튼 클릭
 
 ## Available Scripts
 
