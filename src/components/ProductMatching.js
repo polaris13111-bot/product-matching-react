@@ -7,7 +7,8 @@ const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:5003';
 function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold, topN, refreshKey, onRefresh }) {
   const [orderMatches, setOrderMatches] = useState({}); // { rowIndex: [matches] }
   const [bulkLoading, setBulkLoading] = useState(false);
-  const [autoApplied, setAutoApplied] = useState({}); // { rowIndex: matchInfo } — 100% auto-matched
+  const [autoApplied, setAutoApplied] = useState({}); // { rowIndex: matchInfo } — 100% auto-matched (current run)
+  const [sessionTotals, setSessionTotals] = useState({ exact: 0, model: 0 }); // cumulative across runs
   const [autoMatchLog, setAutoMatchLog] = useState([]);
   const [autoMatchRunning, setAutoMatchRunning] = useState(false);
 
@@ -62,6 +63,9 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
       setAutoApplied(autoMap);
 
       if (writeOps.length > 0) {
+        const exactNew = Object.values(autoMap).filter(m => m._matchType === '100%일치').length;
+        const modelNew = Object.values(autoMap).filter(m => m._matchType === '모델명100%일치').length;
+        setSessionTotals(prev => ({ exact: prev.exact + exactNew, model: prev.model + modelNew }));
         await Promise.all(writeOps);
         if (onRefresh) onRefresh();
       }
@@ -104,6 +108,7 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
 
   const autoCount = Object.keys(autoApplied).length;
   const candidateCount = Object.keys(orderMatches).length;
+  const sessionTotal = sessionTotals.exact + sessionTotals.model;
 
   return (
     <div>
@@ -121,10 +126,10 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
           <div className="number">{excelData ? Object.keys(excelData).length : 0}</div>
           <div className="label">엑셀 탭 수</div>
         </div>
-        {(autoCount > 0 || candidateCount > 0) && (
+        {sessionTotal > 0 && (
           <div className="stat-box">
-            <div className="number">{autoCount}</div>
-            <div className="label">자동 적용</div>
+            <div className="number">{sessionTotal}</div>
+            <div className="label">자동 적용 (정확 {sessionTotals.exact} · 모델명 {sessionTotals.model})</div>
           </div>
         )}
       </div>
@@ -152,8 +157,17 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
           </div>
         ) : (
           <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
-            페이지 로드 시 자동으로 매칭됩니다. 100% 또는 모델명 일치는 시트에 자동 기록됩니다.
-            {autoCount > 0 && <span style={{ marginLeft: '0.5rem', color: '#16a34a', fontWeight: 600 }}>이번 실행: {autoCount}건 자동 적용</span>}
+            페이지 로드 시 자동으로 매칭됩니다. 100% 유사도 또는 모델명 일치는 시트에 자동 기록됩니다.
+            {autoCount > 0 && (
+              <span style={{ marginLeft: '0.5rem', color: '#16a34a', fontWeight: 600 }}>
+                이번 실행: {autoCount}건 (정확 {Object.values(autoApplied).filter(m => m._matchType === '100%일치').length} · 모델명 {Object.values(autoApplied).filter(m => m._matchType === '모델명100%일치').length})
+              </span>
+            )}
+            {sessionTotal > autoCount && (
+              <span style={{ marginLeft: '0.5rem', color: '#6b7280' }}>
+                · 세션 누적: {sessionTotal}건
+              </span>
+            )}
           </div>
         )}
       </div>
