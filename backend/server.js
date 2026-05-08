@@ -444,6 +444,63 @@ app.post('/api/batch-update-match', async (req, res) => {
   }
 });
 
+// Scan whole sheet, prepend leading 0 to Korean phone numbers in
+// 수령인휴대폰 / 수령인연락처 columns when missing.
+app.post('/api/fix-all-phones', async (req, res) => {
+  try {
+    if (!sheetsClient) {
+      return res.status(500).json({ error: 'Google Sheets client not initialized' });
+    }
+    const { spreadsheetId } = req.body;
+    if (!spreadsheetId) {
+      return res.status(400).json({ error: 'Missing spreadsheetId' });
+    }
+
+    const sheetRes = await sheetsClient.spreadsheets.values.get({
+      spreadsheetId,
+      range: '시트1!A1:AC10000',
+      valueRenderOption: 'FORMATTED_VALUE'
+    });
+    const rows = sheetRes.data.values || [];
+    if (rows.length < 2) return res.json({ fixed: 0 });
+
+    const headers = rows[0];
+    const colIndices = ['수령인휴대폰', '수령인연락처']
+      .map(name => headers.indexOf(name))
+      .filter(idx => idx >= 0);
+
+    const updates = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      for (const colIdx of colIndices) {
+        const val = row[colIdx];
+        if (val == null || val === '') continue;
+        const s = String(val);
+        const digits = s.replace(/\D/g, '');
+        if (digits.length >= 9 && digits.length <= 10 && digits.startsWith('1')) {
+          const colLetter = columnIndexToLetter(colIdx);
+          updates.push({
+            range: `시트1!${colLetter}${i + 1}`,
+            values: [['0' + s]]
+          });
+        }
+      }
+    }
+
+    if (updates.length > 0) {
+      await sheetsClient.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: { valueInputOption: 'RAW', data: updates }
+      });
+    }
+
+    res.json({ fixed: updates.length });
+  } catch (error) {
+    console.error('Error fixing phones:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Load latest Excel from Google Drive
 app.get('/api/load-latest-excel', async (req, res) => {
   try {

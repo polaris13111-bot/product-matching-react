@@ -31,6 +31,13 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
     if (!excelData || unmatchedOrders.length === 0) return;
     setBulkLoading(true);
     try {
+      // Fire-and-forget: fix phone numbers across the entire sheet
+      if (spreadsheetId) {
+        axios.post(`${API_URL}/api/fix-all-phones`, { spreadsheetId })
+          .then(r => { if (r.data?.fixed) console.log(`Fixed ${r.data.fixed} phone numbers`); })
+          .catch(err => console.error('Phone fix error', err));
+      }
+
       const res = await axios.post(`${API_URL}/api/find-matches-bulk`, {
         orders: unmatchedOrders.map(o => ({
           rowIndex: o._rowIndex,
