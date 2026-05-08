@@ -156,9 +156,10 @@ function autoMatchProducts(orderProductName, excelProducts) {
 
     // 각 상품 확인
     for (const row of data) {
-      const excelProductName = row[productCol];
-
-      if (!excelProductName || excelProductName.trim() === '') continue;
+      const rawProductName = row[productCol];
+      if (rawProductName === undefined || rawProductName === null) continue;
+      const excelProductName = String(rawProductName);
+      if (excelProductName.trim() === '') continue;
 
       // 데이터 추출
       const supplyPriceResult = findColumnValue(
@@ -172,7 +173,7 @@ function autoMatchProducts(orderProductName, excelProducts) {
       const imageResult = findColumnValue(row, headers, ['대표 1', '이미지', 'Image']);
       const optionResult = findColumnValue(row, headers, ['옵션', 'Option', '규격']);
 
-      const modelName = modelCol ? (row[modelCol] || '') : '';
+      const modelName = modelCol ? String(row[modelCol] ?? '') : '';
 
       const matchInfo = {
         탭: tabName,
