@@ -1,44 +1,32 @@
-const Fuse = require('fuse.js');
-
-/**
- * 문자열 정규화 함수
- * - 공백, 줄바꿈 제거
- * - 특수문자 제거
- * - 알파벳 소문자로 변환
- * - 숫자는 유지
- */
 function normalizeString(text) {
   if (!text || text === '') return '';
-
-  text = String(text).trim();
-  text = text.replace(/[\n\r]/g, '');
-  text = text.toLowerCase();
-  text = text.replace(/[^a-z0-9가-힣]/g, '');
-
-  return text;
+  return String(text)
+    .trim()
+    .replace(/[\n\r]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]/g, '');
 }
 
-/**
- * 두 문자열 간의 유사도 계산 (token_set_ratio와 유사)
- * Fuse.js의 점수를 0-100 범위로 변환
- */
+function bigrams(s) {
+  const set = new Set();
+  for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+  return set;
+}
+
 function calculateSimilarity(str1, str2) {
-  if (!str1 || !str2) return 0;
+  const n1 = normalizeString(str1);
+  const n2 = normalizeString(str2);
+  if (!n1 || !n2) return 0;
+  if (n1 === n2) return 100;
+  if (n1.length < 2 || n2.length < 2) return 0;
 
-  const fuse = new Fuse([str2], {
-    includeScore: true,
-    threshold: 1.0, // 모든 매칭 허용
-  });
+  const a = bigrams(n1);
+  const b = bigrams(n2);
+  let inter = 0;
+  for (const bg of a) if (b.has(bg)) inter++;
+  const dice = (2 * inter) / (a.size + b.size);
 
-  const result = fuse.search(str1);
-
-  if (result.length === 0) return 0;
-
-  // Fuse.js score는 0(완벽한 매칭) ~ 1(매칭 안 됨)
-  // 이를 100(완벽) ~ 0(매칭 안 됨)으로 변환
-  const similarity = (1 - result[0].score) * 100;
-
-  return Math.round(similarity * 10) / 10; // 소수점 1자리
+  return Math.round(dice * 1000) / 10;
 }
 
 /**
