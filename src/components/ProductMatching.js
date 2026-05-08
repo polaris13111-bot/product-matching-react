@@ -16,6 +16,17 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
   const [manualMatches, setManualMatches] = useState([]);
   const [manualLoading, setManualLoading] = useState(false);
 
+  const fixKoreanPhone = (val) => {
+    if (val == null || val === '') return null;
+    const s = String(val);
+    const digits = s.replace(/\D/g, '');
+    // Missing leading 0: digits 9~10 chars starting with 1 (e.g., 1012345678 → 01012345678)
+    if (digits.length >= 9 && digits.length <= 10 && digits.startsWith('1')) {
+      return '0' + s;
+    }
+    return null;
+  };
+
   const runBulkSearch = async () => {
     if (!excelData || unmatchedOrders.length === 0) return;
     setBulkLoading(true);
@@ -33,24 +44,32 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
       const autoMap = {};
       const writeOps = [];
 
+      const orderByRow = Object.fromEntries(unmatchedOrders.map(o => [o._rowIndex, o]));
+
       for (const r of res.data.results || []) {
         if (r.autoMatch?.match) {
           autoMap[r.rowIndex] = { ...r.autoMatch.match, _matchType: r.autoMatch.matchType };
           if (spreadsheetId) {
             const m = r.autoMatch.match;
+            const order = orderByRow[r.rowIndex] || {};
+            const phoneFix1 = fixKoreanPhone(order['수령인휴대폰']);
+            const phoneFix2 = fixKoreanPhone(order['수령인연락처']);
+            const matchedData = {
+              매칭상품_상품명: m.상품명,
+              매입: m.입고가계 || '',
+              매출: m['공급가(V+) 배송비 포함'] || '',
+              업체: m.운영사 || '',
+              탭: m.탭 || '',
+              옵션: m.옵션 || '',
+              매칭방식: r.autoMatch.matchType
+            };
+            if (phoneFix1) matchedData.수령인휴대폰 = phoneFix1;
+            if (phoneFix2) matchedData.수령인연락처 = phoneFix2;
             writeOps.push(
               axios.post(`${API_URL}/api/update-match`, {
                 spreadsheetId,
                 rowIndex: r.rowIndex,
-                matchedData: {
-                  매칭상품_상품명: m.상품명,
-                  매입: m.입고가계 || '',
-                  매출: m['공급가(V+) 배송비 포함'] || '',
-                  업체: m.운영사 || '',
-                  탭: m.탭 || '',
-                  옵션: m.옵션 || '',
-                  매칭방식: r.autoMatch.matchType
-                }
+                matchedData
               }).catch(err => console.error('Auto-apply write error', err))
             );
           }

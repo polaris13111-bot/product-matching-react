@@ -308,6 +308,10 @@ app.post('/api/update-match', async (req, res) => {
       '매칭방식': matchedData.매칭방식 || ''
     };
 
+    // Optional phone-number fixes (only written when caller provides them)
+    if (matchedData.수령인휴대폰 != null) columnsToWrite['수령인휴대폰'] = matchedData.수령인휴대폰;
+    if (matchedData.수령인연락처 != null) columnsToWrite['수령인연락처'] = matchedData.수령인연락처;
+
     // Find or add columns
     let needsHeaderUpdate = false;
     const updates = [];
