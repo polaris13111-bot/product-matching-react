@@ -2,7 +2,7 @@
 FROM node:20-alpine AS frontend-build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --silent
+RUN npm ci --legacy-peer-deps --no-audit --no-fund
 COPY src/ ./src/
 COPY public/ ./public/
 # 백엔드가 /api/ 경로로 서빙하므로 API URL은 상대 경로
@@ -15,7 +15,7 @@ WORKDIR /app
 
 # 백엔드 의존성
 COPY backend/package*.json ./
-RUN npm ci --only=production --silent
+RUN npm ci --omit=dev --legacy-peer-deps --no-audit --no-fund
 
 # 백엔드 코드
 COPY backend/ .
