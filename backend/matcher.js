@@ -104,9 +104,10 @@ function findMatchingProducts(orderProductName, excelProducts, topN = 5, thresho
 
     // 각 상품과 유사도 비교
     data.forEach(row => {
-      const excelProductName = row[productCol];
-
-      if (!excelProductName || excelProductName.trim() === '') return;
+      const rawValue = row[productCol];
+      if (rawValue === undefined || rawValue === null) return;
+      const excelProductName = String(rawValue);
+      if (excelProductName.trim() === '') return;
 
       // 유사도 계산
       const similarity = calculateSimilarity(orderProductName, excelProductName);
