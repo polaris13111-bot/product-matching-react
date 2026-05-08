@@ -27,40 +27,43 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
         excelProducts: excelData,
         topN: Math.max(topN, 3)
       });
-      const map = {};
-      (res.data.results || []).forEach(r => { map[r.rowIndex] = r.matches || []; });
-      setOrderMatches(map);
 
-      // Auto-apply 100% matches
-      if (spreadsheetId) {
-        const autoMap = {};
-        const writeOps = [];
-        for (const r of res.data.results || []) {
-          const top = r.matches?.[0];
-          if (top && top.유사도 === 100) {
-            autoMap[r.rowIndex] = top;
+      const matchMap = {};
+      const autoMap = {};
+      const writeOps = [];
+
+      for (const r of res.data.results || []) {
+        if (r.autoMatch?.match) {
+          autoMap[r.rowIndex] = { ...r.autoMatch.match, _matchType: r.autoMatch.matchType };
+          if (spreadsheetId) {
+            const m = r.autoMatch.match;
             writeOps.push(
               axios.post(`${API_URL}/api/update-match`, {
                 spreadsheetId,
                 rowIndex: r.rowIndex,
                 matchedData: {
-                  매칭상품_상품명: top.상품명,
-                  매입: top.입고가계 || '',
-                  매출: top['공급가(V+) 배송비 포함'] || '',
-                  업체: top.운영사 || '',
-                  탭: top.탭 || '',
-                  옵션: top.옵션 || '',
-                  매칭방식: '자동매칭(100%)'
+                  매칭상품_상품명: m.상품명,
+                  매입: m.입고가계 || '',
+                  매출: m['공급가(V+) 배송비 포함'] || '',
+                  업체: m.운영사 || '',
+                  탭: m.탭 || '',
+                  옵션: m.옵션 || '',
+                  매칭방식: r.autoMatch.matchType
                 }
               }).catch(err => console.error('Auto-apply write error', err))
             );
           }
+        } else {
+          matchMap[r.rowIndex] = r.matches || [];
         }
-        if (writeOps.length > 0) {
-          setAutoApplied(autoMap);
-          await Promise.all(writeOps);
-          if (onRefresh) onRefresh();
-        }
+      }
+
+      setOrderMatches(matchMap);
+      setAutoApplied(autoMap);
+
+      if (writeOps.length > 0) {
+        await Promise.all(writeOps);
+        if (onRefresh) onRefresh();
       }
     } catch (err) {
       console.error('Bulk search error:', err);
@@ -75,61 +78,9 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [excelData, unmatchedOrders, refreshKey]);
 
-  // Run auto-match for all unmatched orders
   const runAutoMatch = async () => {
-    if (!excelData || unmatchedOrders.length === 0) return;
-    setAutoMatchRunning(true);
     setAutoMatchLog([]);
-
-    const results = [];
-    for (const order of unmatchedOrders) {
-      try {
-        const res = await axios.post(`${API_URL}/api/auto-match`, {
-          orderProductName: order._orderName,
-          excelProducts: excelData
-        });
-
-        if (res.data.match) {
-          // Auto-match succeeded, write to spreadsheet
-          const logEntry = { order: order._orderName, success: true, matchType: res.data.matchType, match: res.data.match };
-          results.push(logEntry);
-          setAutoMatchLog(prev => [...prev, logEntry]);
-
-          // Write to spreadsheet
-          try {
-            await axios.post(`${API_URL}/api/update-match`, {
-              spreadsheetId,
-              rowIndex: order._rowIndex,
-              matchedData: {
-                매칭상품_상품명: res.data.match.상품명,
-                매입: res.data.match.입고가계,
-                매출: res.data.match['공급가(V+) 배송비 포함'],
-                업체: res.data.match.운영사,
-                탭: res.data.match.탭,
-                옵션: res.data.match.옵션 || '',
-                매칭방식: res.data.matchType
-              }
-            });
-          } catch (writeErr) {
-            console.error('Sheet write error:', writeErr);
-          }
-        } else {
-          const logEntry = { order: order._orderName, success: false };
-          results.push(logEntry);
-          setAutoMatchLog(prev => [...prev, logEntry]);
-        }
-      } catch (err) {
-        const logEntry = { order: order._orderName, success: false, error: err.message };
-        results.push(logEntry);
-        setAutoMatchLog(prev => [...prev, logEntry]);
-      }
-    }
-
-    setAutoMatchRunning(false);
-    const successCount = results.filter(r => r.success).length;
-    if (successCount > 0 && onRefresh) {
-      onRefresh();
-    }
+    await runBulkSearch();
   };
 
   // Manual search
@@ -151,8 +102,8 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
     }
   };
 
-  const successCount = autoMatchLog.filter(l => l.success).length;
-  const failCount = autoMatchLog.filter(l => !l.success).length;
+  const autoCount = Object.keys(autoApplied).length;
+  const candidateCount = Object.keys(orderMatches).length;
 
   return (
     <div>
@@ -170,10 +121,10 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
           <div className="number">{excelData ? Object.keys(excelData).length : 0}</div>
           <div className="label">엑셀 탭 수</div>
         </div>
-        {autoMatchLog.length > 0 && (
+        {(autoCount > 0 || candidateCount > 0) && (
           <div className="stat-box">
-            <div className="number">{successCount}/{autoMatchLog.length}</div>
-            <div className="label">자동매칭 성공</div>
+            <div className="number">{autoCount}</div>
+            <div className="label">자동 적용</div>
           </div>
         )}
       </div>
@@ -185,35 +136,24 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
           <button
             className="btn-primary"
             onClick={runAutoMatch}
-            disabled={autoMatchRunning || !excelData || unmatchedOrders.length === 0}
+            disabled={bulkLoading || !excelData || unmatchedOrders.length === 0}
           >
-            {autoMatchRunning ? (
+            {bulkLoading ? (
               <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }}></span> 실행 중...</>
             ) : (
-              '자동 매칭 실행'
+              '자동 매칭 다시 실행'
             )}
           </button>
         </div>
 
-        {!excelData && (
+        {!excelData ? (
           <div style={{ fontSize: '0.85rem', color: '#9ca3af' }}>
             엑셀 데이터를 먼저 로드해주세요.
           </div>
-        )}
-
-        {autoMatchLog.length > 0 && (
-          <div className="log-area">
-            {autoMatchLog.map((log, i) => (
-              <div key={i} className={`log-entry ${log.success ? 'success' : 'fail'}`}>
-                {log.success
-                  ? `[성공] ${log.order} → ${log.match?.상품명} (${log.matchType})`
-                  : `[실패] ${log.order}`
-                }
-              </div>
-            ))}
-            <div className="log-entry info" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
-              완료: 성공 {successCount}건, 실패 {failCount}건
-            </div>
+        ) : (
+          <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
+            페이지 로드 시 자동으로 매칭됩니다. 100% 또는 모델명 일치는 시트에 자동 기록됩니다.
+            {autoCount > 0 && <span style={{ marginLeft: '0.5rem', color: '#16a34a', fontWeight: 600 }}>이번 실행: {autoCount}건 자동 적용</span>}
           </div>
         )}
       </div>

@@ -137,7 +137,8 @@ app.get('/api/sheets/:sheetName', async (req, res) => {
 
     const response = await sheetsClient.spreadsheets.values.get({
       spreadsheetId: spreadsheetId,
-      range: range
+      range: range,
+      valueRenderOption: 'FORMATTED_VALUE'
     });
 
     const rows = response.data.values;
@@ -223,7 +224,9 @@ app.post('/api/find-matches', async (req, res) => {
   }
 });
 
-// Bulk find matches — single request to process all unmatched orders
+// Bulk find matches — single request to process all unmatched orders.
+// For each order: first try autoMatch (100% string OR 100% model name).
+// If hit → return the auto-match (frontend will apply). Else → return top-N candidates.
 app.post('/api/find-matches-bulk', async (req, res) => {
   try {
     const { orders, excelProducts, topN = 5 } = req.body;
@@ -232,10 +235,21 @@ app.post('/api/find-matches-bulk', async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters (orders, excelProducts)' });
     }
 
-    const results = orders.map(o => ({
-      rowIndex: o.rowIndex,
-      matches: findMatchingProducts(o.orderProductName, excelProducts, topN, 0)
-    }));
+    const results = orders.map(o => {
+      const auto = autoMatchProducts(o.orderProductName, excelProducts);
+      if (auto.match) {
+        return {
+          rowIndex: o.rowIndex,
+          autoMatch: { match: auto.match, matchType: auto.matchType },
+          matches: []
+        };
+      }
+      return {
+        rowIndex: o.rowIndex,
+        autoMatch: null,
+        matches: findMatchingProducts(o.orderProductName, excelProducts, topN, 0)
+      };
+    });
 
     res.json({ results });
   } catch (error) {
@@ -287,6 +301,7 @@ app.post('/api/update-match', async (req, res) => {
       '매칭상품_상품명': matchedData.매칭상품_상품명 || '',
       '매칭_매입': matchedData.매입 || '',
       '매칭_매출': matchedData.매출 || '',
+      '매칭_매입(업체)': matchedData.업체 || '',
       '업체': matchedData.업체 || '',
       '매칭_탭': matchedData.탭 || '',
       '매칭_옵션': matchedData.옵션 || '',
@@ -364,7 +379,7 @@ app.post('/api/batch-update-match', async (req, res) => {
     });
 
     const headers = headerRes.data.values ? headerRes.data.values[0] : [];
-    const columnNames = ['매칭상품_상품명', '매칭_매입', '매칭_매출', '업체', '매칭_탭', '매칭_옵션', '매칭방식'];
+    const columnNames = ['매칭상품_상품명', '매칭_매입', '매칭_매출', '매칭_매입(업체)', '업체', '매칭_탭', '매칭_옵션', '매칭방식'];
 
     let needsHeaderUpdate = false;
     const colIndices = {};
@@ -391,6 +406,7 @@ app.post('/api/batch-update-match', async (req, res) => {
     const aliasMap = {
       '매칭_매입': '매입',
       '매칭_매출': '매출',
+      '매칭_매입(업체)': '업체',
       '매칭_탭': '탭',
       '매칭_옵션': '옵션'
     };
