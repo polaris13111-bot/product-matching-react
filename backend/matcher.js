@@ -72,72 +72,60 @@ function findColumnValue(row, columns, targetNames) {
 /**
  * 상품 매칭 찾기 (Fuzzy matching)
  */
-function findMatchingProducts(orderProductName, excelProducts, topN = 5, threshold = 60) {
-  if (!orderProductName || orderProductName.trim() === '') {
+function findMatchingProducts(orderProductName, excelProducts, topN = 5, threshold = 0) {
+  if (!orderProductName || String(orderProductName).trim() === '') {
     return [];
   }
 
   const matches = [];
 
-  // 각 탭별로 상품명 검색
   for (const [tabName, tabData] of Object.entries(excelProducts)) {
     const { headers, data } = tabData;
 
-    // 상품명 컬럼 찾기
-    let productCol = headers.find(h =>
+    const productCol = headers.find(h =>
       h.includes('상품명') || h.includes('제품명') || h.toLowerCase().includes('product')
     );
-
     if (!productCol) continue;
 
-    // 각 상품과 유사도 비교
     data.forEach(row => {
       const rawValue = row[productCol];
       if (rawValue === undefined || rawValue === null) return;
       const excelProductName = String(rawValue);
       if (excelProductName.trim() === '') return;
 
-      // 유사도 계산
       const similarity = calculateSimilarity(orderProductName, excelProductName);
+      if (similarity <= 0) return;
 
-      if (similarity >= threshold) {
-        // 공급가 찾기 (3단계 매칭)
-        const supplyPriceResult = findColumnValue(
-          row,
-          headers,
-          ['공급가(V+) 배송비 포함', '공급가', '매출']
-        );
+      const supplyPriceResult = findColumnValue(
+        row,
+        headers,
+        ['공급가(V+) 배송비 포함', '공급가', '매출']
+      );
 
-        // 옵션 찾기
-        let optionValue = '';
-        const optionCols = ['옵션', 'Option', '규격'];
-        for (const col of optionCols) {
-          if (headers.includes(col)) {
-            optionValue = row[col] || '';
-            break;
-          }
+      let optionValue = '';
+      for (const col of ['옵션', 'Option', '규격']) {
+        if (headers.includes(col)) {
+          optionValue = row[col] || '';
+          break;
         }
-
-        matches.push({
-          탭: tabName,
-          상품명: excelProductName,
-          유사도: similarity,
-          입고가계: row['입고가계'] || '',
-          '공급가(V+) 배송비 포함': supplyPriceResult.value,
-          운영사: row['운영사'] || '',
-          '대표 1': row['대표 1'] || '',
-          옵션: optionValue,
-          매칭로그: supplyPriceResult.method ? { '매출(공급가)': supplyPriceResult.method } : {}
-        });
       }
+
+      matches.push({
+        탭: tabName,
+        상품명: excelProductName,
+        유사도: similarity,
+        입고가계: row['입고가계'] || '',
+        '공급가(V+) 배송비 포함': supplyPriceResult.value,
+        운영사: row['운영사'] || '',
+        '대표 1': row['대표 1'] || '',
+        옵션: optionValue,
+        매칭로그: supplyPriceResult.method ? { '매출(공급가)': supplyPriceResult.method } : {}
+      });
     });
   }
 
-  // 유사도 순으로 정렬
   matches.sort((a, b) => b.유사도 - a.유사도);
-
-  // 상위 N개만 반환
-  return matches.slice(0, topN);
+  return matches.slice(0, Math.max(topN, 3));
 }
 
 /**

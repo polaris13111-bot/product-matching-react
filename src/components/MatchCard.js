@@ -56,11 +56,25 @@ function MatchCard({ match, index, spreadsheetId, rowIndex, orderName, onMatched
     );
   }
 
+  const thumbnailUrl = match['대표 1'];
+  const isImageUrl = typeof thumbnailUrl === 'string' && /^https?:\/\//.test(thumbnailUrl);
+
   return (
     <div className="match-card">
       <span className={`similarity-badge ${badgeClass}`}>
         {similarity}%
       </span>
+
+      {isImageUrl && (
+        <img
+          src={thumbnailUrl}
+          alt=""
+          className="match-thumbnail"
+          loading="lazy"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, marginRight: 12 }}
+        />
+      )}
 
       <div className="match-info">
         <div className="product-name">{match.상품명}</div>

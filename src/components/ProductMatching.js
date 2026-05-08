@@ -1,54 +1,84 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import MatchCard from './MatchCard';
 
 const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:5003';
 
 function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold, topN, onRefresh }) {
-  const [expandedOrder, setExpandedOrder] = useState(null);
   const [orderMatches, setOrderMatches] = useState({}); // { rowIndex: [matches] }
-  const [loadingOrder, setLoadingOrder] = useState(null);
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [autoApplied, setAutoApplied] = useState({}); // { rowIndex: matchInfo } — 100% auto-matched
   const [autoMatchLog, setAutoMatchLog] = useState([]);
   const [autoMatchRunning, setAutoMatchRunning] = useState(false);
 
-  // Manual search state
   const [manualSearch, setManualSearch] = useState('');
   const [manualMatches, setManualMatches] = useState([]);
   const [manualLoading, setManualLoading] = useState(false);
 
-  // Find matches for a specific order
-  const findMatchesForOrder = async (order) => {
-    if (!excelData) return;
-    const rowIdx = order._rowIndex;
-    setLoadingOrder(rowIdx);
-    setExpandedOrder(rowIdx);
+  const lastBulkKeyRef = useRef(null);
 
+  const runBulkSearch = async () => {
+    if (!excelData || unmatchedOrders.length === 0) return;
+    setBulkLoading(true);
     try {
-      const res = await axios.post(`${API_URL}/api/find-matches`, {
-        orderProductName: order._orderName,
+      const res = await axios.post(`${API_URL}/api/find-matches-bulk`, {
+        orders: unmatchedOrders.map(o => ({
+          rowIndex: o._rowIndex,
+          orderProductName: o._orderName
+        })),
         excelProducts: excelData,
-        topN,
-        threshold
+        topN: Math.max(topN, 3)
       });
-      setOrderMatches(prev => ({ ...prev, [rowIdx]: res.data.matches || [] }));
+      const map = {};
+      (res.data.results || []).forEach(r => { map[r.rowIndex] = r.matches || []; });
+      setOrderMatches(map);
+
+      // Auto-apply 100% matches
+      if (spreadsheetId) {
+        const autoMap = {};
+        const writeOps = [];
+        for (const r of res.data.results || []) {
+          const top = r.matches?.[0];
+          if (top && top.유사도 === 100) {
+            autoMap[r.rowIndex] = top;
+            writeOps.push(
+              axios.post(`${API_URL}/api/update-match`, {
+                spreadsheetId,
+                rowIndex: r.rowIndex,
+                matchedData: {
+                  매칭상품_상품명: top.상품명,
+                  매입: top.입고가계 || '',
+                  매출: top['공급가(V+) 배송비 포함'] || '',
+                  업체: top.운영사 || '',
+                  탭: top.탭 || '',
+                  옵션: top.옵션 || '',
+                  매칭방식: '자동매칭(100%)'
+                }
+              }).catch(err => console.error('Auto-apply write error', err))
+            );
+          }
+        }
+        if (writeOps.length > 0) {
+          setAutoApplied(autoMap);
+          await Promise.all(writeOps);
+          if (onRefresh) onRefresh();
+        }
+      }
     } catch (err) {
-      console.error('Search error:', err);
+      console.error('Bulk search error:', err);
     } finally {
-      setLoadingOrder(null);
+      setBulkLoading(false);
     }
   };
 
-  // Toggle order expansion
-  const toggleOrder = (order) => {
-    if (expandedOrder === order._rowIndex) {
-      setExpandedOrder(null);
-    } else {
-      setExpandedOrder(order._rowIndex);
-      if (!orderMatches[order._rowIndex]) {
-        findMatchesForOrder(order);
-      }
-    }
-  };
+  useEffect(() => {
+    if (!excelData || unmatchedOrders.length === 0) return;
+    const key = `${Object.keys(excelData).length}|${unmatchedOrders.map(o => o._rowIndex).join(',')}`;
+    if (lastBulkKeyRef.current === key) return;
+    lastBulkKeyRef.current = key;
+    runBulkSearch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [excelData, unmatchedOrders]);
 
   // Run auto-match for all unmatched orders
   const runAutoMatch = async () => {
@@ -197,7 +227,23 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
       <div className="card">
         <div className="card-header">
           <h2>미매칭 주문 ({unmatchedOrders.length}건)</h2>
+          <button
+            className="btn-secondary btn-sm"
+            onClick={runBulkSearch}
+            disabled={bulkLoading || !excelData}
+          >
+            {bulkLoading ? '검색 중...' : '전체 재검색'}
+          </button>
         </div>
+
+        {bulkLoading && Object.keys(orderMatches).length === 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem 0' }}>
+            <span className="spinner"></span>
+            <span style={{ fontSize: '0.85rem', color: '#6b7280' }}>
+              {unmatchedOrders.length}건 자동 검색 중...
+            </span>
+          </div>
+        )}
 
         {unmatchedOrders.length === 0 ? (
           <div className="empty-state">
@@ -207,55 +253,42 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
           </div>
         ) : (
           <div className="order-list">
-            {unmatchedOrders.map((order) => (
-              <div key={order._rowIndex} className="order-item">
-                <div className="order-item-header" onClick={() => toggleOrder(order)}>
-                  <span className="row-num">#{order._rowIndex}</span>
-                  <span className="order-name">{order._orderName}</span>
-                  <span className="toggle-icon">
-                    {expandedOrder === order._rowIndex ? '▲' : '▼'}
-                  </span>
-                </div>
-
-                {expandedOrder === order._rowIndex && (
+            {unmatchedOrders.map((order) => {
+              const matches = orderMatches[order._rowIndex] || [];
+              const auto = autoApplied[order._rowIndex];
+              return (
+                <div key={order._rowIndex} className="order-item" style={auto ? { borderColor: '#22c55e', background: '#f0fdf4' } : undefined}>
+                  <div className="order-item-header">
+                    <span className="row-num">#{order._rowIndex}</span>
+                    <span className="order-name">{order._orderName}</span>
+                    {auto && <span style={{ color: '#16a34a', fontSize: '0.85rem', fontWeight: 600 }}>✓ 100% 자동매칭</span>}
+                  </div>
                   <div className="order-item-body">
-                    {loadingOrder === order._rowIndex ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem 0' }}>
-                        <span className="spinner"></span>
-                        <span style={{ fontSize: '0.85rem', color: '#6b7280' }}>유사 상품 검색 중...</span>
+                    {auto ? (
+                      <div style={{ fontSize: '0.85rem', color: '#16a34a', padding: '0.5rem 0' }}>
+                        → {auto.상품명} (탭: {auto.탭})
+                      </div>
+                    ) : matches.length === 0 ? (
+                      <div style={{ fontSize: '0.85rem', color: '#9ca3af', padding: '0.5rem 0' }}>
+                        {bulkLoading ? '검색 중...' : '유사 상품 없음'}
                       </div>
                     ) : (
-                      <>
-                        {(orderMatches[order._rowIndex] || []).length === 0 ? (
-                          <div style={{ fontSize: '0.85rem', color: '#9ca3af', padding: '0.5rem 0' }}>
-                            유사 상품을 찾지 못했습니다. 유사도 기준을 낮춰보세요.
-                          </div>
-                        ) : (
-                          (orderMatches[order._rowIndex] || []).map((match, idx) => (
-                            <MatchCard
-                              key={idx}
-                              match={match}
-                              index={idx}
-                              spreadsheetId={spreadsheetId}
-                              rowIndex={order._rowIndex}
-                              orderName={order._orderName}
-                              onMatched={onRefresh}
-                            />
-                          ))
-                        )}
-                        <button
-                          className="btn-secondary btn-sm"
-                          style={{ marginTop: '0.5rem' }}
-                          onClick={() => findMatchesForOrder(order)}
-                        >
-                          다시 검색
-                        </button>
-                      </>
+                      matches.map((match, idx) => (
+                        <MatchCard
+                          key={idx}
+                          match={match}
+                          index={idx}
+                          spreadsheetId={spreadsheetId}
+                          rowIndex={order._rowIndex}
+                          orderName={order._orderName}
+                          onMatched={onRefresh}
+                        />
+                      ))
                     )}
                   </div>
-                )}
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

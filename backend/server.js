@@ -208,7 +208,7 @@ app.post('/api/upload-excel', upload.single('file'), async (req, res) => {
 // Find matching products
 app.post('/api/find-matches', async (req, res) => {
   try {
-    const { orderProductName, excelProducts, topN = 5, threshold = 60 } = req.body;
+    const { orderProductName, excelProducts, topN = 5, threshold = 0 } = req.body;
 
     if (!orderProductName || !excelProducts) {
       return res.status(400).json({ error: 'Missing required parameters' });
@@ -219,6 +219,27 @@ app.post('/api/find-matches', async (req, res) => {
     res.json({ matches });
   } catch (error) {
     console.error('Error finding matches:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Bulk find matches — single request to process all unmatched orders
+app.post('/api/find-matches-bulk', async (req, res) => {
+  try {
+    const { orders, excelProducts, topN = 5 } = req.body;
+
+    if (!Array.isArray(orders) || !excelProducts) {
+      return res.status(400).json({ error: 'Missing required parameters (orders, excelProducts)' });
+    }
+
+    const results = orders.map(o => ({
+      rowIndex: o.rowIndex,
+      matches: findMatchingProducts(o.orderProductName, excelProducts, topN, 0)
+    }));
+
+    res.json({ results });
+  } catch (error) {
+    console.error('Error in bulk find-matches:', error);
     res.status(500).json({ error: error.message });
   }
 });
