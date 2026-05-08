@@ -427,10 +427,8 @@ const clientBuildPath = path.join(__dirname, 'client');
 if (fs.existsSync(clientBuildPath)) {
   app.use(express.static(clientBuildPath));
   // SPA fallback: React Router가 처리
-  app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api')) {
-      res.sendFile(path.join(clientBuildPath, 'index.html'));
-    }
+  app.get(/^\/(?!api).*/, (req, res) => {
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
   });
   console.log('Serving React build from:', clientBuildPath);
 }
