@@ -61,6 +61,7 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
             const order = orderByRow[r.rowIndex] || {};
             const phoneFix1 = fixKoreanPhone(order['수령인휴대폰']);
             const phoneFix2 = fixKoreanPhone(order['수령인연락처']);
+            const phoneFix3 = fixKoreanPhone(order['주문자 연락처']);
             const matchedData = {
               매칭상품_상품명: m.상품명,
               매입: m.입고가계 || '',
@@ -72,6 +73,7 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
             };
             if (phoneFix1) matchedData.수령인휴대폰 = phoneFix1;
             if (phoneFix2) matchedData.수령인연락처 = phoneFix2;
+            if (phoneFix3) matchedData['주문자 연락처'] = phoneFix3;
             writeOps.push(
               axios.post(`${API_URL}/api/update-match`, {
                 spreadsheetId,
