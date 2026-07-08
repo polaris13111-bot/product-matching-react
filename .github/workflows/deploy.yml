@@ -52,5 +52,8 @@ jobs:
             --min-instances 0 \
             --max-instances 20 \
             --service-account ${{ env.RUNTIME_SA }} \
-            --set-secrets GOOGLE_CREDENTIALS_JSON=gcp-service-account:latest \
+            --set-secrets GOOGLE_CREDENTIALS_JSON=gcp-service-account:latest,DATABASE_URL=DATABASE_URL:latest \
             --quiet
+        # ⚠️ 사람 게이트: Secret Manager 에 DATABASE_URL(롤=r_matching, 읽기전용) 등록 필요.
+        # nf_main 이 Cloud SQL 이면 사설IP 또는 --add-cloudsql-instances(+소켓 host)가
+        # 추가로 필요할 수 있음 — 형제앱 접속 관례에 맞춰 사람이 확정.

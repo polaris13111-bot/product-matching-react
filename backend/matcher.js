@@ -1,3 +1,17 @@
+// backend/matcher.js — 상품명 유사도 매칭 (자체 Dice bigram, Fuse.js 아님)
+//
+// 입력 상품(product)은 nf_main 카탈로그 행:
+//   { id, name, name_raw, operator_name, model_code, status,
+//     purchase_normal, sale_c, shipping_fee, 옵션 }
+// 매칭에 쓰는 상품명 = product.name. id 는 올바른 행을 집는 데만 쓰고 시트엔 저장하지 않는다.
+
+// 단종 판정값 (2026-07-08 DB조사 확정). status 다른 값: active/out_of_stock/hidden 은 단종 아님.
+const DISCONTINUED_STATUS = 'discontinued';
+
+// 모델명(model_code) 100% 매칭 오매칭 가드
+const MODEL_CODE_MIN_LEN = 3;        // 정규화 길이 3 미만이면 스킵 (예: 'S', 'A1')
+const MODEL_MATCH_MIN_SIMILARITY = 30; // 모델코드 포함이어도 상품명 유사도가 이 이하면 스킵
+
 function normalizeString(text) {
   if (!text || text === '') return '';
   return String(text)
@@ -30,186 +44,78 @@ function calculateSimilarity(str1, str2) {
 }
 
 /**
- * 컬럼 값 찾기 (3단계 매칭)
+ * 상품 매칭 후보 찾기 (Dice 유사도).
+ * @param {string} orderProductName 주문 상품명
+ * @param {Array} products          카탈로그 (nf_main product_masters 조인)
+ * @param {number} topN             상위 N개
+ * @param {number} threshold        최소 유사도(이하 후보 제거) — UI 슬라이더값
+ * @returns {Array} product + { 유사도 }
  */
-function findColumnValue(row, columns, targetNames) {
-  if (typeof targetNames === 'string') {
-    targetNames = [targetNames];
-  }
-
-  // 1단계: 정확한 매칭
-  for (const col of columns) {
-    if (targetNames.includes(col)) {
-      return { value: row[col] || '', method: '1단계:정확' };
-    }
-  }
-
-  // 2단계: 정규화 매칭
-  const normalizedTargets = targetNames.map(t => normalizeString(t));
-  for (const col of columns) {
-    const normalizedCol = normalizeString(col);
-    if (normalizedTargets.includes(normalizedCol)) {
-      return { value: row[col] || '', method: '2단계:정규화' };
-    }
-  }
-
-  // 3단계: 95% 이상 유사도 매칭
-  for (const col of columns) {
-    const normalizedCol = normalizeString(col);
-    for (const normTarget of normalizedTargets) {
-      if (normTarget && normalizedCol) {
-        const similarity = calculateSimilarity(normalizedCol, normTarget);
-        if (similarity >= 95) {
-          return { value: row[col] || '', method: `3단계:유사도${Math.round(similarity)}%` };
-        }
-      }
-    }
-  }
-
-  return { value: '', method: null };
-}
-
-/**
- * 상품 매칭 찾기 (Fuzzy matching)
- */
-function findMatchingProducts(orderProductName, excelProducts, topN = 5, threshold = 0) {
-  if (!orderProductName || String(orderProductName).trim() === '') {
-    return [];
-  }
+function findMatchingProducts(orderProductName, products, topN = 5, threshold = 0) {
+  if (!orderProductName || String(orderProductName).trim() === '') return [];
+  if (!Array.isArray(products)) return [];
 
   const matches = [];
-
-  for (const [tabName, tabData] of Object.entries(excelProducts)) {
-    const { headers, data } = tabData;
-
-    const productCol = headers.find(h =>
-      h.includes('상품명') || h.includes('제품명') || h.toLowerCase().includes('product')
-    );
-    if (!productCol) continue;
-
-    data.forEach(row => {
-      const rawValue = row[productCol];
-      if (rawValue === undefined || rawValue === null) return;
-      const excelProductName = String(rawValue);
-      if (excelProductName.trim() === '') return;
-
-      const similarity = calculateSimilarity(orderProductName, excelProductName);
-      if (similarity <= 0) return;
-
-      const supplyPriceResult = findColumnValue(
-        row,
-        headers,
-        ['공급가(V+) 배송비 포함', '공급가', '매출']
-      );
-
-      let optionValue = '';
-      for (const col of ['옵션', 'Option', '규격']) {
-        if (headers.includes(col)) {
-          optionValue = row[col] || '';
-          break;
-        }
-      }
-
-      matches.push({
-        탭: tabName,
-        상품명: excelProductName,
-        유사도: similarity,
-        입고가계: row['입고가계'] || '',
-        '공급가(V+) 배송비 포함': supplyPriceResult.value,
-        운영사: row['운영사'] || '',
-        '대표 1': row['대표 1'] || '',
-        옵션: optionValue,
-        매칭로그: supplyPriceResult.method ? { '매출(공급가)': supplyPriceResult.method } : {}
-      });
-    });
+  for (const p of products) {
+    if (!p || !p.name) continue;
+    const similarity = calculateSimilarity(orderProductName, p.name);
+    if (similarity <= 0 || similarity < threshold) continue;
+    matches.push({ ...p, 유사도: similarity });
   }
 
   matches.sort((a, b) => b.유사도 - a.유사도);
-  return matches.slice(0, Math.max(topN, 3));
+  return matches.slice(0, Math.max(1, topN));
 }
 
 /**
- * 자동 매칭 (100% 일치 또는 모델명 100% 일치)
+ * 자동 매칭 (상품명 100% 일치 또는 모델명 100% 포함).
+ * 모델명 매칭은 짧은/숫자 model_code 광범위 오매칭을 막기 위해 길이·유사도 가드를 건다.
+ * @returns {{ match: object|null, matchType: string|null }}
  */
-function autoMatchProducts(orderProductName, excelProducts) {
-  if (!orderProductName || orderProductName.trim() === '') {
+function autoMatchProducts(orderProductName, products) {
+  if (!orderProductName || String(orderProductName).trim() === '') {
     return { match: null, matchType: null };
   }
+  if (!Array.isArray(products)) return { match: null, matchType: null };
 
   const normalizedOrder = normalizeString(orderProductName);
 
-  // 각 탭별로 검색
-  for (const [tabName, tabData] of Object.entries(excelProducts)) {
-    const { headers, data } = tabData;
-
-    // 상품명 컬럼 찾기
-    let productCol = headers.find(h =>
-      h.includes('상품명') || h.includes('제품명') || h.toLowerCase().includes('product')
-    );
-
-    if (!productCol) continue;
-
-    // 모델명 컬럼 찾기
-    let modelCol = headers.find(h =>
-      h.includes('모델명') || h.toLowerCase().includes('model')
-    );
-
-    // 각 상품 확인
-    for (const row of data) {
-      const rawProductName = row[productCol];
-      if (rawProductName === undefined || rawProductName === null) continue;
-      const excelProductName = String(rawProductName);
-      if (excelProductName.trim() === '') continue;
-
-      // 데이터 추출
-      const supplyPriceResult = findColumnValue(
-        row,
-        headers,
-        ['공급가(V+) 배송비 포함', '공급가', '매출']
-      );
-
-      const purchasePriceResult = findColumnValue(row, headers, ['입고가계', '매입']);
-      const vendorResult = findColumnValue(row, headers, ['운영사', '공급사', '업체']);
-      const imageResult = findColumnValue(row, headers, ['대표 1', '이미지', 'Image']);
-      const optionResult = findColumnValue(row, headers, ['옵션', 'Option', '규격']);
-
-      const modelName = modelCol ? String(row[modelCol] ?? '') : '';
-
-      const matchInfo = {
-        탭: tabName,
-        상품명: excelProductName,
-        유사도: 100.0,
-        입고가계: purchasePriceResult.value,
-        '공급가(V+) 배송비 포함': supplyPriceResult.value,
-        운영사: vendorResult.value,
-        '대표 1': imageResult.value,
-        모델명: modelName,
-        옵션: optionResult.value,
-        매칭로그: supplyPriceResult.method ? { '매출(공급가)': supplyPriceResult.method } : {}
-      };
-
-      // 1. 상품명 100% 일치 확인
-      if (orderProductName === excelProductName) {
-        return { match: matchInfo, matchType: '100%일치' };
-      }
-
-      // 2. 모델명 100% 포함 확인
-      if (modelName && modelName.trim() !== '') {
-        const normalizedModel = normalizeString(modelName);
-        if (normalizedModel && normalizedOrder.includes(normalizedModel)) {
-          return { match: matchInfo, matchType: '모델명100%일치' };
-        }
-      }
+  // 1순위: 상품명 완전 일치 (전체 스캔 우선)
+  for (const p of products) {
+    if (p && p.name && orderProductName === p.name) {
+      return { match: { ...p, 유사도: 100 }, matchType: '100%일치' };
     }
+  }
+
+  // 2순위: 모델명 100% 포함 (가드 통과 + 상품명 유사도 보조조건, 최고 유사도 채택)
+  let best = null;
+  let bestSim = -1;
+  for (const p of products) {
+    if (!p || !p.model_code) continue;
+    const normalizedModel = normalizeString(p.model_code);
+    // 가드: 정규화 길이 부족하거나 순수 숫자면 스킵
+    if (normalizedModel.length < MODEL_CODE_MIN_LEN) continue;
+    if (/^\d+$/.test(normalizedModel)) continue;
+    if (!normalizedOrder.includes(normalizedModel)) continue;
+    // 보조조건: 상품명 유사도가 최소치 이상이어야 오매칭 방지
+    const sim = calculateSimilarity(orderProductName, p.name || '');
+    if (sim < MODEL_MATCH_MIN_SIMILARITY) continue;
+    if (sim > bestSim) {
+      bestSim = sim;
+      best = p;
+    }
+  }
+  if (best) {
+    return { match: { ...best, 유사도: bestSim }, matchType: '모델명100%일치' };
   }
 
   return { match: null, matchType: null };
 }
 
 module.exports = {
+  DISCONTINUED_STATUS,
   normalizeString,
   calculateSimilarity,
   findMatchingProducts,
   autoMatchProducts,
-  findColumnValue
 };

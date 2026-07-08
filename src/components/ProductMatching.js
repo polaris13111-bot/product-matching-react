@@ -4,34 +4,23 @@ import MatchCard from './MatchCard';
 
 const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:5003';
 
-function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold, topN, refreshKey, onRefresh }) {
+function ProductMatching({ productCount, unmatchedOrders, spreadsheetId, threshold, topN, refreshKey, onRefresh }) {
   const [orderMatches, setOrderMatches] = useState({}); // { rowIndex: [matches] }
   const [bulkLoading, setBulkLoading] = useState(false);
   const [autoApplied, setAutoApplied] = useState({}); // { rowIndex: matchInfo } — 100% auto-matched (current run)
   const [sessionTotals, setSessionTotals] = useState({ exact: 0, model: 0 }); // cumulative across runs
-  const [autoMatchLog, setAutoMatchLog] = useState([]);
-  const [autoMatchRunning, setAutoMatchRunning] = useState(false);
 
   const [manualSearch, setManualSearch] = useState('');
   const [manualMatches, setManualMatches] = useState([]);
   const [manualLoading, setManualLoading] = useState(false);
 
-  const fixKoreanPhone = (val) => {
-    if (val == null || val === '') return null;
-    const s = String(val);
-    const digits = s.replace(/\D/g, '');
-    // Missing leading 0: digits 9~10 chars starting with 1 (e.g., 1012345678 → 01012345678)
-    if (digits.length >= 9 && digits.length <= 10 && digits.startsWith('1')) {
-      return '0' + s;
-    }
-    return null;
-  };
+  const hasCatalog = (productCount ?? 0) > 0;
 
   const runBulkSearch = async () => {
-    if (!excelData || unmatchedOrders.length === 0) return;
+    if (!hasCatalog || unmatchedOrders.length === 0) return;
     setBulkLoading(true);
     try {
-      // Fire-and-forget: fix phone numbers across the entire sheet
+      // Fire-and-forget: fix phone numbers across the entire sheet (single, server-side path)
       if (spreadsheetId) {
         axios.post(`${API_URL}/api/fix-all-phones`, { spreadsheetId })
           .then(r => { if (r.data?.fixed) console.log(`Fixed ${r.data.fixed} phone numbers`); })
@@ -43,45 +32,22 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
           rowIndex: o._rowIndex,
           orderProductName: o._orderName
         })),
-        excelProducts: excelData,
-        topN: Math.max(topN, 3)
+        topN: Math.max(topN, 3),
+        threshold
       });
 
       const matchMap = {};
       const autoMap = {};
-      const writeOps = [];
-
-      const orderByRow = Object.fromEntries(unmatchedOrders.map(o => [o._rowIndex, o]));
+      const autoBatch = []; // 자동매칭 일괄 기록 (헤더경합 방지: 단일 batch 호출)
 
       for (const r of res.data.results || []) {
         if (r.autoMatch?.match) {
           autoMap[r.rowIndex] = { ...r.autoMatch.match, _matchType: r.autoMatch.matchType };
-          if (spreadsheetId) {
-            const m = r.autoMatch.match;
-            const order = orderByRow[r.rowIndex] || {};
-            const phoneFix1 = fixKoreanPhone(order['수령인휴대폰']);
-            const phoneFix2 = fixKoreanPhone(order['수령인연락처']);
-            const phoneFix3 = fixKoreanPhone(order['주문자 연락처']);
-            const matchedData = {
-              매칭상품_상품명: m.상품명,
-              매입: m.입고가계 || '',
-              매출: m['공급가(V+) 배송비 포함'] || '',
-              업체: m.운영사 || '',
-              탭: m.탭 || '',
-              옵션: m.옵션 || '',
-              매칭방식: r.autoMatch.matchType
-            };
-            if (phoneFix1) matchedData.수령인휴대폰 = phoneFix1;
-            if (phoneFix2) matchedData.수령인연락처 = phoneFix2;
-            if (phoneFix3) matchedData['주문자 연락처'] = phoneFix3;
-            writeOps.push(
-              axios.post(`${API_URL}/api/update-match`, {
-                spreadsheetId,
-                rowIndex: r.rowIndex,
-                matchedData
-              }).catch(err => console.error('Auto-apply write error', err))
-            );
-          }
+          autoBatch.push({
+            rowIndex: r.rowIndex,
+            master: r.autoMatch.match,
+            matchType: r.autoMatch.matchType
+          });
         } else {
           matchMap[r.rowIndex] = r.matches || [];
         }
@@ -90,11 +56,14 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
       setOrderMatches(matchMap);
       setAutoApplied(autoMap);
 
-      if (writeOps.length > 0) {
+      if (spreadsheetId && autoBatch.length > 0) {
         const exactNew = Object.values(autoMap).filter(m => m._matchType === '100%일치').length;
         const modelNew = Object.values(autoMap).filter(m => m._matchType === '모델명100%일치').length;
         setSessionTotals(prev => ({ exact: prev.exact + exactNew, model: prev.model + modelNew }));
-        await Promise.all(writeOps);
+        await axios.post(`${API_URL}/api/batch-update-match`, {
+          spreadsheetId,
+          matches: autoBatch
+        }).catch(err => console.error('Auto-apply batch write error', err));
         if (onRefresh) onRefresh();
       }
     } catch (err) {
@@ -105,24 +74,18 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
   };
 
   useEffect(() => {
-    if (!excelData || unmatchedOrders.length === 0) return;
+    if (!hasCatalog || unmatchedOrders.length === 0) return;
     runBulkSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [excelData, unmatchedOrders, refreshKey]);
-
-  const runAutoMatch = async () => {
-    setAutoMatchLog([]);
-    await runBulkSearch();
-  };
+  }, [productCount, unmatchedOrders, refreshKey]);
 
   // Manual search
   const handleManualSearch = async () => {
-    if (!manualSearch.trim() || !excelData) return;
+    if (!manualSearch.trim() || !hasCatalog) return;
     setManualLoading(true);
     try {
       const res = await axios.post(`${API_URL}/api/find-matches`, {
         orderProductName: manualSearch,
-        excelProducts: excelData,
         topN,
         threshold
       });
@@ -135,7 +98,6 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
   };
 
   const autoCount = Object.keys(autoApplied).length;
-  const candidateCount = Object.keys(orderMatches).length;
   const sessionTotal = sessionTotals.exact + sessionTotals.model;
 
   return (
@@ -147,12 +109,8 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
           <div className="label">미매칭 주문</div>
         </div>
         <div className="stat-box">
-          <div className="number">{excelData ? Object.values(excelData).reduce((sum, tab) => sum + tab.data.length, 0) : 0}</div>
-          <div className="label">엑셀 상품 수</div>
-        </div>
-        <div className="stat-box">
-          <div className="number">{excelData ? Object.keys(excelData).length : 0}</div>
-          <div className="label">엑셀 탭 수</div>
+          <div className="number">{productCount ?? 0}</div>
+          <div className="label">상품 마스터 수</div>
         </div>
         {sessionTotal > 0 && (
           <div className="stat-box">
@@ -168,8 +126,8 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
           <h2>자동 매칭</h2>
           <button
             className="btn-primary"
-            onClick={runAutoMatch}
-            disabled={bulkLoading || !excelData || unmatchedOrders.length === 0}
+            onClick={runBulkSearch}
+            disabled={bulkLoading || !hasCatalog || unmatchedOrders.length === 0}
           >
             {bulkLoading ? (
               <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }}></span> 실행 중...</>
@@ -179,9 +137,9 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
           </button>
         </div>
 
-        {!excelData ? (
+        {!hasCatalog ? (
           <div style={{ fontSize: '0.85rem', color: '#9ca3af' }}>
-            엑셀 데이터를 먼저 로드해주세요.
+            상품 마스터(DB)를 불러오지 못했습니다. 연결 상태를 확인해주세요.
           </div>
         ) : (
           <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
@@ -207,7 +165,7 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
           <button
             className="btn-secondary btn-sm"
             onClick={runBulkSearch}
-            disabled={bulkLoading || !excelData}
+            disabled={bulkLoading || !hasCatalog}
           >
             {bulkLoading ? '검색 중...' : '전체 재검색'}
           </button>
@@ -243,7 +201,7 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
                   <div className="order-item-body">
                     {auto ? (
                       <div style={{ fontSize: '0.85rem', color: '#16a34a', padding: '0.5rem 0' }}>
-                        → {auto.상품명} (탭: {auto.탭})
+                        → {auto.name} {auto.status === 'discontinued' && <span style={{ color: '#dc2626', fontWeight: 600 }}>[단종]</span>}
                       </div>
                     ) : matches.length === 0 ? (
                       <div style={{ fontSize: '0.85rem', color: '#9ca3af', padding: '0.5rem 0' }}>
@@ -289,7 +247,7 @@ function ProductMatching({ excelData, unmatchedOrders, spreadsheetId, threshold,
           <button
             className="btn-primary"
             onClick={handleManualSearch}
-            disabled={manualLoading || !excelData}
+            disabled={manualLoading || !hasCatalog}
           >
             {manualLoading ? '검색 중...' : '검색'}
           </button>

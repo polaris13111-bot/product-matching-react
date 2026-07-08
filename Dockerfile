@@ -23,9 +23,6 @@ COPY backend/ .
 # React 빌드 결과 → 백엔드의 client/ 폴더로 복사
 COPY --from=frontend-build /app/build ./client
 
-# uploads 디렉토리 생성
-RUN mkdir -p uploads
-
 ENV PORT=8080
 EXPOSE 8080
 
