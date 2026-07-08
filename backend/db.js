@@ -3,9 +3,14 @@
 // 예전 Google Drive Excel 파이프라인을 대체한다. 주문/매칭결과는 여전히
 // Google Sheets 에 있고, "상품 마스터"만 DB 에서 읽는다(읽기 전용, 롤=r_matching).
 //
-// 접속은 env 로만. 자격증명 하드코딩 금지.
-//   - DATABASE_URL (권장, Secret Manager 주입)  예) postgres://user:pw@host:5432/db
-//   - 또는 PG* 개별 (PGHOST/PGUSER/PGPASSWORD/PGDATABASE/PGPORT)
+// 접속은 env 로만. 자격증명 하드코딩 금지. 우선순위:
+//   1) DATABASE_URL            — 로컬/유연 (예: postgres://user:pw@host:5432/db)
+//   2) CLOUD_SQL_INSTANCE +    — 프로덕션(Cloud Run) 형제앱 관례. Cloud SQL 유닉스 소켓.
+//      DB_USER + DB_PASSWORD     host=/cloudsql/<INSTANCE>, database=CLOUD_SQL_DATABASE
+//      (+CLOUD_SQL_DATABASE)     비밀번호는 Secret Manager(nf-db-role-matching) 주입.
+//   3) PG* 개별                — PGHOST/PGUSER/PGPASSWORD/PGDATABASE/PGPORT
+//
+// nf_main = Cloud SQL 인스턴스 blackyak-493519:asia-northeast3:nf-db (형제앱 registrar/pricing 과 동일).
 //
 // ⚠️ 조인키/컬럼명은 여기 한 곳에만 있다. DB 스키마가 바뀌면 아래 두 상수만 고쳐라.
 //    (2026-07-08 DB조사팀 확정: pmp.master_id / pv.master_id / pm.operator_id→companies.id)
@@ -31,21 +36,42 @@ WHERE master_id = ANY($1) AND is_active`;
 
 // ── 접속 풀 (지연 초기화) ─────────────────────────────────────
 let _pool = null;
+function buildPoolConfig() {
+  const base = { application_name: 'product-matcher' };
+  // 1) DATABASE_URL
+  if (process.env.DATABASE_URL) {
+    return { ...base, connectionString: process.env.DATABASE_URL };
+  }
+  // 2) Cloud SQL 유닉스 소켓 (형제앱 관례). pg 는 host 가 '/' 로 시작하면 소켓 디렉터리로 취급.
+  if (process.env.CLOUD_SQL_INSTANCE && process.env.DB_USER && process.env.DB_PASSWORD) {
+    return {
+      ...base,
+      host: `/cloudsql/${process.env.CLOUD_SQL_INSTANCE}`,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.CLOUD_SQL_DATABASE || 'nf_main',
+    };
+  }
+  // 3) PG* 개별 (pg 가 PGHOST/PGUSER/... 자동 인식)
+  if (process.env.PGHOST || process.env.PGUSER) {
+    return base;
+  }
+  return null;
+}
+
 function getPool() {
   if (_pool) return _pool;
-  if (process.env.DATABASE_URL) {
-    _pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      application_name: 'product-matcher',
-    });
-  } else if (process.env.PGHOST || process.env.PGUSER) {
-    // pg 가 PGHOST/PGUSER/PGPASSWORD/PGDATABASE/PGPORT 를 자동으로 읽는다
-    _pool = new Pool({ application_name: 'product-matcher' });
-  } else {
+  const cfg = buildPoolConfig();
+  if (!cfg) {
     throw new Error(
-      'DB 접속 정보 없음: DATABASE_URL 또는 PG* 환경변수를 설정하세요 (롤=r_matching, 읽기전용)'
+      'DB 접속 정보 없음: DATABASE_URL 또는 (CLOUD_SQL_INSTANCE+DB_USER+DB_PASSWORD) 또는 PG* 를 설정하세요 (롤=r_matching, 읽기전용)'
     );
   }
+  _pool = new Pool(cfg);
+  // idle client 에러로 프로세스가 크래시하지 않도록 (네트워크/서버 재시작 등)
+  _pool.on('error', (err) => {
+    console.error('pg pool idle client error:', err.message);
+  });
   return _pool;
 }
 

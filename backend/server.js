@@ -7,8 +7,7 @@ const { findMatchingProducts, autoMatchProducts, DISCONTINUED_STATUS } = require
 const { getCatalog } = require('./db');
 require('dotenv').config();
 
-// 주문/매칭결과가 있는 Google Sheet. 시트명 하드코딩 제거 → env 로 조정 가능.
-const SPREADSHEET_NAME = process.env.SPREADSHEET_NAME || '상품매칭용시트';
+// 주문/매칭결과가 있는 Google Sheet 의 탭 이름. 하드코딩 제거 → env 로 조정 가능.
 const ORDER_SHEET = process.env.ORDER_SHEET_NAME || '시트1';
 
 const app = express();
@@ -111,11 +110,13 @@ function computeFill(master, matchType) {
   const reverseMargin = saleRaw != null && purchaseRaw != null && saleRaw < purchaseRaw;
   const saleNull = saleRaw == null;
 
+  // 금액 컬럼(매칭_매입/매칭_매출)은 number|null 로 둔다 → 시트에 numberValue 로 기록
+  // (텍스트로 넣으면 SUM 무시·사전식 정렬 파손). 나머지는 문자열.
   const values = {
     '매칭상품_상품명': master.name ?? '',
     '매칭_매입(업체)': master.operator_name ?? '',
-    '매칭_매입': purchase == null ? '' : String(purchase),
-    '매칭_매출': sale == null ? '' : String(sale),
+    '매칭_매입': purchase,   // number | null
+    '매칭_매출': sale,       // number | null
     '매칭_옵션': master.옵션 ?? '',
     // 매칭_탭 = 단종 경고 전용. 단종이면 '단종' 표시, 아니면 빈칸.
     '매칭_탭': discontinued ? '단종' : '',
@@ -124,6 +125,9 @@ function computeFill(master, matchType) {
 
   return { values, flags: { discontinued, reverseMargin, saleNull } };
 }
+
+// 숫자로 기록할 컬럼 (SUM/정렬 유지)
+const NUMERIC_COLUMNS = new Set(['매칭_매입', '매칭_매출']);
 
 // 서식 색상 (Sheets API color: 0~1)
 const COLOR = {
@@ -148,20 +152,6 @@ app.get('/api/health', (req, res) => {
     status: 'OK',
     googleSheetsConnected: sheetsClient !== null,
   });
-});
-
-// Get spreadsheet URL
-app.get('/api/spreadsheet-url', async (req, res) => {
-  try {
-    const id = await findSpreadsheetId(SPREADSHEET_NAME);
-    if (id) {
-      res.json({ url: `https://docs.google.com/spreadsheets/d/${id}`, spreadsheetId: id });
-    } else {
-      res.json({ url: '', spreadsheetId: null });
-    }
-  } catch (error) {
-    res.json({ url: '', spreadsheetId: null });
-  }
 });
 
 // Get Google Sheets data (주문 시트 조회)
@@ -310,6 +300,16 @@ app.post('/api/batch-update-match', async (req, res) => {
 
     const requests = [];
     let skippedCells = 0;
+    let coloredEmptyCells = 0;
+
+    // 셀 요청 헬퍼 (row/col 0-based)
+    const cellAt = (row, col, fields, cell) => ({
+      updateCells: {
+        rows: [{ values: [cell] }],
+        fields,
+        start: { sheetId, rowIndex: row, columnIndex: col },
+      },
+    });
 
     for (const { rowIndex, master, matchType } of matches) {
       const r = Number(rowIndex);
@@ -321,29 +321,36 @@ app.post('/api/batch-update-match', async (req, res) => {
         const idx = colIndex[name];
         if (idx == null) continue; // 헤더에 없는 컬럼은 스킵(append 안 함)
 
-        const value = values[name];
-        // 매칭_탭은 단종일 때만 채운다(빈 값이면 아예 쓰지 않음).
-        if (value === '' || value == null) continue;
-
-        // 기존 값 보존: 이미 값 있으면 덮어쓰지 않음.
+        // 기존 값 보존: 이미 값 있으면 값도 색도 건드리지 않음.
         const existing = existingRow[idx];
         if (existing != null && String(existing).trim() !== '') {
           skippedCells++;
           continue;
         }
 
-        requests.push({
-          updateCells: {
-            rows: [{
-              values: [{
-                userEnteredValue: { stringValue: String(value) },
-                userEnteredFormat: { backgroundColor: cellColor(name, flags) },
-              }],
-            }],
-            fields: 'userEnteredValue,userEnteredFormat.backgroundColor',
-            start: { sheetId, rowIndex: r - 1, columnIndex: idx },
-          },
-        });
+        const raw = values[name];
+        const isNumeric = NUMERIC_COLUMNS.has(name);
+        const hasValue = isNumeric
+          ? (raw != null && Number.isFinite(raw))
+          : (raw != null && String(raw) !== '');
+
+        if (hasValue) {
+          // 값 + 배경색 (금액은 numberValue, 나머지는 stringValue)
+          const userEnteredValue = isNumeric
+            ? { numberValue: Number(raw) }
+            : { stringValue: String(raw) };
+          requests.push(cellAt(r - 1, idx, 'userEnteredValue,userEnteredFormat.backgroundColor', {
+            userEnteredValue,
+            userEnteredFormat: { backgroundColor: cellColor(name, flags) },
+          }));
+        } else if (name === '매칭_매출' && flags.saleNull) {
+          // 동공급가 미설정: 매칭_매출 값은 비워두되(기존값 보존 원칙) 배경만 노랑.
+          requests.push(cellAt(r - 1, idx, 'userEnteredFormat.backgroundColor', {
+            userEnteredFormat: { backgroundColor: COLOR.yellow },
+          }));
+          coloredEmptyCells++;
+        }
+        // 그 외 빈 값(예: 단종 아닌 매칭_탭)은 아무것도 쓰지 않음.
       }
     }
 
@@ -358,6 +365,7 @@ app.post('/api/batch-update-match', async (req, res) => {
       success: true,
       updatedCount: matches.length,
       writtenCells: requests.length,
+      coloredEmptyCells,
       skippedCells,
       missingColumns,
     });
@@ -478,7 +486,6 @@ app.listen(PORT, () => {
   console.log(`   GET  /api/health`);
   console.log(`   GET  /api/products`);
   console.log(`   GET  /api/sheets/:sheetName`);
-  console.log(`   GET  /api/spreadsheet-url`);
   console.log(`   POST /api/find-matches`);
   console.log(`   POST /api/find-matches-bulk`);
   console.log(`   POST /api/batch-update-match`);

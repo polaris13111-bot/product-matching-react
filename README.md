@@ -42,7 +42,9 @@ npm install
 
 - **Google Sheets**: 서비스 계정 JSON → `backend/config/Google Sheets API.json`
   (프로덕션은 `GOOGLE_CREDENTIALS_JSON` 환경변수 / Secret Manager 주입)
-- **nf_main DB**: `DATABASE_URL` 환경변수 (롤 `r_matching`, 읽기 전용).
+- **nf_main DB**: 롤 `r_matching` (읽기 전용). 로컬은 `DATABASE_URL`,
+  프로덕션(Cloud Run)은 Cloud SQL 소켓(`DB_USER`/`DB_PASSWORD`/`CLOUD_SQL_INSTANCE`/
+  `CLOUD_SQL_DATABASE`) — 형제앱 registrar/pricing 과 동일 관례.
   GRANT SQL 은 `db/r_matching_grant.sql` 참고 (소유롤로 실행하는 임시 롤).
 
 ### 3. 애플리케이션 실행
