@@ -200,8 +200,17 @@ function ProductMatching({ productCount, unmatchedOrders, spreadsheetId, thresho
                   </div>
                   <div className="order-item-body">
                     {auto ? (
-                      <div style={{ fontSize: '0.85rem', color: '#16a34a', padding: '0.5rem 0' }}>
-                        → {auto.name} {auto.status === 'discontinued' && <span style={{ color: '#dc2626', fontWeight: 600 }}>[단종]</span>}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: '#16a34a', padding: '0.5rem 0' }}>
+                        {auto.representative_image_url && (
+                          <img
+                            src={auto.representative_image_url}
+                            alt=""
+                            loading="lazy"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                            style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6 }}
+                          />
+                        )}
+                        <span>→ {auto.name} {auto.status === 'discontinued' && <span style={{ color: '#dc2626', fontWeight: 600 }}>[단종]</span>}</span>
                       </div>
                     ) : matches.length === 0 ? (
                       <div style={{ fontSize: '0.85rem', color: '#9ca3af', padding: '0.5rem 0' }}>
