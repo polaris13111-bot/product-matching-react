@@ -11,6 +11,8 @@ env:
   SERVICE: product-matcher
   AR_REPO: product-matcher
   RUNTIME_SA: id-648@stable-vault-473902-b0.iam.gserviceaccount.com
+  # nf_main = Cloud SQL (다른 프로젝트 blackyak-493519). 형제앱 registrar/pricing 과 동일 인스턴스.
+  CLOUD_SQL_INSTANCE: blackyak-493519:asia-northeast3:nf-db
 
 jobs:
   deploy:
@@ -40,6 +42,12 @@ jobs:
           echo "IMAGE_URI=$IMAGE:${{ github.sha }}" >> $GITHUB_ENV
 
       - name: Deploy to Cloud Run
+        # ── DB 접속: nf_main Cloud SQL 유닉스 소켓 (형제앱 registrar/pricing 관례 미러) ──
+        #   --add-cloudsql-instances 로 소켓 마운트 + DB_USER/DB_PASSWORD/CLOUD_SQL_INSTANCE/
+        #   CLOUD_SQL_DATABASE 를 db.js 가 소켓 DSN(host=/cloudsql/<instance>) 으로 조립.
+        #   비밀번호는 Secret Manager 시크릿 nf-db-role-matching(=r_matching bare 비번).
+        #   ⚠️ 교차프로젝트: 이 서비스는 stable-vault-473902-b0, DB 는 blackyak-493519.
+        #      → RUNTIME_SA(id-648@…) 가 blackyak-493519 에 roles/cloudsql.client 필요(사람 게이트).
         run: |
           gcloud run deploy ${{ env.SERVICE }} \
             --image $IMAGE_URI \
@@ -52,5 +60,7 @@ jobs:
             --min-instances 0 \
             --max-instances 20 \
             --service-account ${{ env.RUNTIME_SA }} \
-            --set-secrets GOOGLE_CREDENTIALS_JSON=gcp-service-account:latest \
+            --add-cloudsql-instances ${{ env.CLOUD_SQL_INSTANCE }} \
+            --set-secrets GOOGLE_CREDENTIALS_JSON=gcp-service-account:latest,DB_PASSWORD=nf-db-role-matching:latest \
+            --set-env-vars DB_USER=r_matching,CLOUD_SQL_INSTANCE=${{ env.CLOUD_SQL_INSTANCE }},CLOUD_SQL_DATABASE=nf_main \
             --quiet

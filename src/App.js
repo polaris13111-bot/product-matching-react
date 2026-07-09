@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import './App.css';
-import FileUpload from './components/FileUpload';
 import ProductMatching from './components/ProductMatching';
 import SpreadsheetViewer from './components/SpreadsheetViewer';
 
@@ -9,8 +8,8 @@ const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:5003';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('matching');
-  const [excelData, setExcelData] = useState(null);
-  const [driveStatus, setDriveStatus] = useState({ loading: false, message: '', fileName: '' });
+  const [productCount, setProductCount] = useState(null);
+  const [productStatus, setProductStatus] = useState({ loading: false, error: '' });
   const [sheetsStatus, setSheetsStatus] = useState({ connected: false, loading: false });
   const [unmatchedOrders, setUnmatchedOrders] = useState([]);
   const [spreadsheetId, setSpreadsheetId] = useState(null);
@@ -19,30 +18,29 @@ function App() {
   const [topN, setTopN] = useState(3);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Load Excel from Drive on startup
-  useEffect(() => {
-    async function loadFromDrive() {
-      setDriveStatus({ loading: true, message: 'Google Drive에서 로드 중...', fileName: '' });
-      try {
-        const res = await axios.get(`${API_URL}/api/load-latest-excel`);
-        if (res.data.success) {
-          setExcelData(res.data.products);
-          setDriveStatus({ loading: false, message: 'Drive에서 자동 로드됨', fileName: res.data.fileName });
-        }
-      } catch (err) {
-        console.log('Drive auto-load not available:', err.response?.data?.error || err.message);
-        setDriveStatus({ loading: false, message: 'Drive 로드 실패', fileName: '' });
-      }
+  // Load product master catalog count from nf_main DB
+  const loadProductCount = useCallback(async () => {
+    setProductStatus({ loading: true, error: '' });
+    try {
+      const res = await axios.get(`${API_URL}/api/products`);
+      setProductCount(res.data.count ?? 0);
+      setProductStatus({ loading: false, error: '' });
+    } catch (err) {
+      const msg = err.response?.data?.error || err.message;
+      console.log('Product catalog load error:', msg);
+      setProductCount(null);
+      setProductStatus({ loading: false, error: msg });
     }
-    loadFromDrive();
   }, []);
+
+  useEffect(() => { loadProductCount(); }, [loadProductCount]);
 
   // Load unmatched orders from Google Sheets
   const loadUnmatchedOrders = useCallback(async () => {
     setSheetsStatus({ connected: false, loading: true });
     try {
       const res = await axios.get(`${API_URL}/api/sheets/상품매칭용시트`, {
-        params: { range: '시트1!A1:Z5000', unmatchedOnly: true }
+        params: { range: '시트1!A1:Z5000' }
       });
       if (res.data) {
         setSheetsStatus({ connected: true, loading: false });
@@ -50,7 +48,6 @@ function App() {
         if (res.data.spreadsheetId) {
           setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${res.data.spreadsheetId}`);
         }
-        // Filter unmatched orders (매칭상품_상품명 is empty)
         const headers = res.data.headers || [];
         const matchColIdx = headers.findIndex(h =>
           h && (h.includes('매칭상품_상품명') || h.includes('매칭상품'))
@@ -79,20 +76,7 @@ function App() {
     }
   }, []);
 
-  useEffect(() => {
-    loadUnmatchedOrders();
-  }, [loadUnmatchedOrders]);
-
-  // Fetch spreadsheet URL
-  useEffect(() => {
-    async function fetchUrl() {
-      try {
-        const res = await axios.get(`${API_URL}/api/spreadsheet-url`);
-        if (res.data.url) setSpreadsheetUrl(res.data.url);
-      } catch (e) { /* ignore */ }
-    }
-    fetchUrl();
-  }, []);
+  useEffect(() => { loadUnmatchedOrders(); }, [loadUnmatchedOrders]);
 
   const handleRefresh = () => {
     setRefreshKey(k => k + 1);
@@ -109,12 +93,12 @@ function App() {
         <div className="sidebar-section">
           <h3>연결 상태</h3>
           <div className="status-row">
-            <span className={`status-dot ${excelData ? 'green' : driveStatus.loading ? 'yellow' : 'red'}`}></span>
-            엑셀: {excelData ? `${Object.keys(excelData).length}개 탭` : driveStatus.loading ? '로딩...' : '없음'}
+            <span className={`status-dot ${productCount != null ? 'green' : productStatus.loading ? 'yellow' : 'red'}`}></span>
+            상품 마스터: {productCount != null ? `${productCount}개` : productStatus.loading ? '로딩...' : 'DB 오류'}
           </div>
-          {driveStatus.fileName && (
-            <div style={{ fontSize: '0.7rem', color: '#9ca3af', paddingLeft: '1rem' }}>
-              {driveStatus.fileName}
+          {productStatus.error && (
+            <div style={{ fontSize: '0.7rem', color: '#ef4444', paddingLeft: '1rem' }}>
+              {productStatus.error}
             </div>
           )}
           <div className="status-row">
@@ -125,12 +109,6 @@ function App() {
             <span className={`status-dot ${unmatchedOrders.length > 0 ? 'yellow' : 'green'}`}></span>
             미매칭: {unmatchedOrders.length}건
           </div>
-        </div>
-
-        {/* Excel Upload */}
-        <div className="sidebar-section">
-          <h3>엑셀 파일</h3>
-          <FileUpload onDataLoaded={setExcelData} />
         </div>
 
         {/* Matching Settings */}
@@ -202,7 +180,7 @@ function App() {
         <div className="content-area">
           {currentPage === 'matching' ? (
             <ProductMatching
-              excelData={excelData}
+              productCount={productCount}
               unmatchedOrders={unmatchedOrders}
               spreadsheetId={spreadsheetId}
               threshold={threshold}

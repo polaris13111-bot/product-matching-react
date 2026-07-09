@@ -1,31 +1,29 @@
 # 상품 매칭 프로그램 (React Version)
 
-Google Sheets와 Excel 파일을 연동하여 상품명을 자동으로 매칭하는 React 기반 웹 애플리케이션입니다.
+주문 상품명을 **nf_main 상품 마스터(Postgres)** 와 매칭하고 결과를 Google Sheets 에 기록하는
+React 기반 웹 애플리케이션입니다. (상품 마스터 소스는 예전 Google Drive Excel → nf_main DB
+직접 SELECT 로 교체됨.)
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
 ## 🚀 기술 스택
 
 ### Frontend
-- **React** 18+ - UI 프레임워크
+- **React** 19 - UI 프레임워크
 - **Axios** - HTTP 클라이언트
-- **Tailwind CSS** - 스타일링
-- **XLSX** - Excel 파일 처리
 
 ### Backend
 - **Express.js** - Node.js 웹 프레임워크
-- **Google Sheets API** - 스프레드시트 연동
-- **XLSX** - Excel 파일 처리
-- **Fuse.js** - 상품 매칭 알고리즘
+- **pg** - nf_main Postgres 상품 마스터 조회 (읽기 전용, 롤 `r_matching`)
+- **Google Sheets API** - 주문 시트 조회 / 매칭 결과 기록
+- **매칭 알고리즘** - 자체 구현 Dice bigram 유사도 (`backend/matcher.js`). Fuse.js 미사용.
 
 ## 📋 주요 기능
 
 - ✅ 상품명 100% 일치 자동 매칭
-- ✅ 모델명 100% 포함 자동 매칭
-- ✅ Fuzzy matching으로 유사 상품 추천
-- ✅ Excel 파일 업로드 및 다중 탭 지원
-- ✅ Google Sheets 실시간 연동
-- ✅ 이미지 URL 미리보기
+- ✅ 모델명 100% 포함 자동 매칭 (짧은/숫자 코드 오매칭 가드)
+- ✅ Dice bigram 유사도로 유사 상품 추천 (UI 최소 유사도/추천 개수 슬라이더 반영)
+- ✅ 매칭 결과 시트 기록 시 서식 경고 (기존값 보존·새로채움 초록·역마진 빨강·단종 빨강·동공급가 미설정 노랑)
 
 ## 🛠️ 설치 및 실행
 
@@ -35,31 +33,33 @@ This project was bootstrapped with [Create React App](https://github.com/faceboo
 # Frontend
 npm install
 
-# Backend
+# Backend (pg 포함)
 cd backend
 npm install
 ```
 
-### 2. Google Sheets API 설정
+### 2. 자격 증명 설정
 
-1. Google Cloud Console에서 프로젝트 생성
-2. Google Sheets API 활성화
-3. 서비스 계정 생성 및 JSON 키 다운로드
-4. `backend/config/` 폴더에 `Google Sheets API.json` 파일로 저장
+- **Google Sheets**: 서비스 계정 JSON → `backend/config/Google Sheets API.json`
+  (프로덕션은 `GOOGLE_CREDENTIALS_JSON` 환경변수 / Secret Manager 주입)
+- **nf_main DB**: 롤 `r_matching` (읽기 전용). 로컬은 `DATABASE_URL`,
+  프로덕션(Cloud Run)은 Cloud SQL 소켓(`DB_USER`/`DB_PASSWORD`/`CLOUD_SQL_INSTANCE`/
+  `CLOUD_SQL_DATABASE`) — 형제앱 registrar/pricing 과 동일 관례.
+  GRANT SQL 은 `db/r_matching_grant.sql` 참고 (소유롤로 실행하는 임시 롤).
 
 ### 3. 애플리케이션 실행
 
 ```bash
 # Backend 시작 (터미널 1)
 cd backend
-npm start
+DATABASE_URL=postgres://r_matching:...@host:5432/nf_main npm start
 
 # Frontend 시작 (터미널 2)
 npm start
 ```
 
-- Backend: http://localhost:5000
-- Frontend: http://localhost:3000
+- Backend: http://localhost:5003
+- Frontend: http://localhost:3333
 
 ## 📁 프로젝트 구조
 
@@ -67,26 +67,28 @@ npm start
 product-matching-react/
 ├── src/
 │   ├── components/        # React 컴포넌트
-│   │   ├── FileUpload.js
 │   │   ├── ProductMatching.js
 │   │   ├── MatchCard.js
 │   │   └── SpreadsheetViewer.js
 │   ├── App.js
 │   └── index.css
 ├── backend/
-│   ├── config/            # Google API 설정
-│   ├── server.js          # Express 서버
-│   ├── matcher.js         # 매칭 로직
+│   ├── config/            # Google API 설정 (로컬)
+│   ├── server.js          # Express 서버 + Sheets 기록/서식 경고
+│   ├── db.js              # nf_main 상품 마스터 조회 (SQL·조인키 한 곳에)
+│   ├── matcher.js         # Dice 유사도 매칭 로직
 │   └── package.json
+├── db/
+│   └── r_matching_grant.sql   # 읽기전용 롤 GRANT (임시 롤, 소유롤로 실행)
 └── README.md
 ```
 
 ## 🎯 사용 방법
 
-1. 엑셀 파일 업로드 (왼쪽 사이드바)
-2. 주문 상품명 입력
-3. "유사 상품 검색" 또는 "자동 매칭" 클릭
-4. 결과 확인 및 "매칭하기" 버튼 클릭
+1. 페이지 로드 시 상품 마스터(DB)와 미매칭 주문(시트)을 자동으로 불러와 매칭
+2. 100% 일치·모델명 일치는 시트에 자동 기록 (기존값은 보존)
+3. 나머지는 후보 목록에서 "매칭" 버튼으로 수동 확정
+4. 수동 검색으로 임의 상품명 매칭 확인 가능
 
 ## Available Scripts
 
