@@ -16,6 +16,7 @@ function MatchCard({ match, index, spreadsheetId, rowIndex, orderName, onMatched
     : similarity >= 30 ? 'tier-low'
     : 'tier-poor';
 
+  const imageUrl = match.representative_image_url;
   const discontinued = match.status === 'discontinued';
   const reverseMargin =
     match.sale_c != null && match.sale_c !== '' &&
@@ -64,6 +65,17 @@ function MatchCard({ match, index, spreadsheetId, rowIndex, orderName, onMatched
       <span className={`similarity-badge ${badgeClass}`}>
         {similarity}%
       </span>
+
+      {imageUrl && (
+        <img
+          src={imageUrl}
+          alt=""
+          className="match-thumbnail"
+          loading="lazy"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, marginRight: 12 }}
+        />
+      )}
 
       <div className="match-info">
         <div className="product-name">

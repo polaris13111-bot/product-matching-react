@@ -18,14 +18,23 @@
 const { Pool } = require('pg');
 
 // ── 상품 마스터 조회 SQL (확정 컬럼) ──────────────────────────
+// 대표이미지 = common.product_images 중 image_type='representative' 을
+// sort_order(동률이면 id) 최소 1건의 url (공개 GCS URL). LATERAL 로 master당 1행.
 const PRODUCT_QUERY = `
 SELECT pm.id, pm.name, pm.name_raw,
        COALESCE(oc.name, pm.notes->>'operator_raw') AS operator_name,
        pm.model_code, pm.status,
-       pmp.purchase_normal, pmp.sale_c, pmp.shipping_fee
+       pmp.purchase_normal, pmp.sale_c, pmp.shipping_fee,
+       img.url AS representative_image_url
 FROM common.product_masters pm
 LEFT JOIN common.companies oc ON oc.id = pm.operator_id
 LEFT JOIN common.product_master_pricing pmp ON pmp.master_id = pm.id
+LEFT JOIN LATERAL (
+  SELECT url FROM common.product_images pi
+  WHERE pi.master_id = pm.id AND pi.image_type = 'representative'
+  ORDER BY pi.sort_order, pi.id
+  LIMIT 1
+) img ON true
 WHERE pm.deleted_at IS NULL`;
 
 // 옵션값(매칭_옵션용) — 매칭된 master 들에 대해서만
