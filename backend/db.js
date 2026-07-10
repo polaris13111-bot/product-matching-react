@@ -20,11 +20,15 @@ const { Pool } = require('pg');
 // ── 상품 마스터 조회 SQL (확정 컬럼) ──────────────────────────
 // 대표이미지 = common.product_images 중 image_type='representative' 을
 // sort_order(동률이면 id) 최소 1건의 url (공개 GCS URL). LATERAL 로 master당 1행.
+//
+// 🥉 동공급가 = pmp.bronze_medal_supply (레지스트라 가격 컬럼 물리 개명: 구 sale_c → 신
+//    bronze_medal_supply). `AS sale_c` 별칭으로 하류(matcher.js/server.js/MatchCard.js)의
+//    row.sale_c 필드명은 불변 — 값 출처만 신 컬럼으로 옮긴다.
 const PRODUCT_QUERY = `
 SELECT pm.id, pm.name, pm.name_raw,
        COALESCE(oc.name, pm.notes->>'operator_raw') AS operator_name,
        pm.model_code, pm.status,
-       pmp.purchase_normal, pmp.sale_c, pmp.shipping_fee,
+       pmp.purchase_normal, pmp.bronze_medal_supply AS sale_c, pmp.shipping_fee,
        img.url AS representative_image_url
 FROM common.product_masters pm
 LEFT JOIN common.companies oc ON oc.id = pm.operator_id
