@@ -88,6 +88,19 @@ body {
   color: white;
 }
 
+.sidebar-link.danger {
+  color: #dc2626;
+}
+
+.sidebar-link.danger:hover {
+  background: #fef2f2;
+}
+
+.sidebar-link.danger:disabled {
+  color: #fca5a5;
+  cursor: not-allowed;
+}
+
 /* Status indicators */
 .status-dot {
   width: 8px;

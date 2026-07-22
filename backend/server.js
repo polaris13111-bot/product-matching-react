@@ -459,6 +459,43 @@ app.post('/api/fix-all-phones', async (req, res) => {
   }
 });
 
+// 시트 초기화 — 헤더(1행)만 남기고 2행부터 값+서식 전부 삭제.
+// updateCells 에 rows 없이 fields 만 주면 해당 범위의 값/서식이 삭제된다.
+// fields 를 '*' 로 하면 메모·데이터검증까지 지워지므로 값+서식만 지정.
+app.post('/api/clear-sheet', async (req, res) => {
+  try {
+    if (!sheetsClient) {
+      return res.status(500).json({ error: 'Google Sheets client not initialized' });
+    }
+    const { spreadsheetId } = req.body;
+    if (!spreadsheetId) {
+      return res.status(400).json({ error: 'Missing spreadsheetId' });
+    }
+
+    const sheetId = await getOrderSheetId(spreadsheetId);
+    if (sheetId == null) {
+      return res.status(404).json({ error: `Sheet '${ORDER_SHEET}' not found` });
+    }
+
+    await sheetsClient.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [{
+          updateCells: {
+            range: { sheetId, startRowIndex: 1 }, // 2행부터 시트 끝까지
+            fields: 'userEnteredValue,userEnteredFormat',
+          },
+        }],
+      },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error clearing sheet:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Helper: Convert column index (0-based) to letter (A, B, ... Z, AA, AB, ...)
 function columnIndexToLetter(index) {
   let letter = '';
@@ -490,4 +527,5 @@ app.listen(PORT, () => {
   console.log(`   POST /api/find-matches-bulk`);
   console.log(`   POST /api/batch-update-match`);
   console.log(`   POST /api/fix-all-phones`);
+  console.log(`   POST /api/clear-sheet`);
 });

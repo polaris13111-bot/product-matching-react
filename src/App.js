@@ -17,6 +17,7 @@ function App() {
   const [threshold, setThreshold] = useState(70);
   const [topN, setTopN] = useState(3);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [clearing, setClearing] = useState(false);
 
   // Load product master catalog count from nf_main DB
   const loadProductCount = useCallback(async () => {
@@ -83,6 +84,20 @@ function App() {
     loadUnmatchedOrders();
   };
 
+  const handleClearSheet = async () => {
+    if (!spreadsheetId || clearing) return;
+    if (!window.confirm('헤더 아래 모든 데이터와 서식을 삭제합니다. 되돌릴 수 없습니다. 계속할까요?')) return;
+    setClearing(true);
+    try {
+      await axios.post(`${API_URL}/api/clear-sheet`, { spreadsheetId });
+      handleRefresh();
+    } catch (err) {
+      alert(`시트 초기화 실패: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <div className="app-container">
       {/* Sidebar */}
@@ -146,6 +161,13 @@ function App() {
           )}
           <button className="sidebar-link" onClick={handleRefresh}>
             새로고침
+          </button>
+          <button
+            className="sidebar-link danger"
+            onClick={handleClearSheet}
+            disabled={!spreadsheetId || clearing}
+          >
+            {clearing ? '삭제 중...' : '시트 초기화'}
           </button>
         </div>
       </aside>
