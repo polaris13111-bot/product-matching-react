@@ -725,6 +725,18 @@ input[type="range"]::-webkit-slider-thumb {
   margin-bottom: 0.3rem;
 }
 
+/* 시트 컬럼 누락 경고 배너 */
+.sheet-warning {
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
 /* 시트 표시 규칙 도움말 (사이드바, 접힘 기본) */
 .help-legend {
   font-size: 0.7rem;

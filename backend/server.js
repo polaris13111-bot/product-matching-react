@@ -103,6 +103,16 @@ function toNumberOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// 시트 수량 파싱. 시트는 FORMATTED_VALUE 로 읽으므로 '1,200'·' 2 ' 처럼
+// 천단위 콤마와 공백이 섞여 들어온다 → Number() 가 그대로면 NaN.
+function parseQty(v) {
+  if (v == null) return null;
+  const s = String(v).replace(/[\s,]/g, '');
+  if (s === '') return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
 // master(카탈로그 행) + matchType + 시트 수량 → 시트에 채울 값 + 경고 플래그
 function computeFill(master, matchType, qty) {
   const shipping = toNumberOrNull(master.shipping_fee) ?? 0;
@@ -159,6 +169,8 @@ function cellColor(colName, flags) {
   if (flags.discontinued && colName === '매칭_탭') return COLOR.red;
   if (flags.saleNull && colName === '매칭_매출') return COLOR.yellow;
   if (flags.multiQty && colName === '매칭_매입') return COLOR.greenHighlight; // 수량 곱해진 금액
+  // 경고 업체 행은 새로 채운 칸도 주황으로 — 안 그러면 채운 칸만 초록이 되어 행 경고가 끊긴다.
+  if (flags.warnSupplier) return COLOR.orange;
   return COLOR.green; // 새로 채운 셀 표시
 }
 
@@ -318,7 +330,12 @@ app.post('/api/batch-update-match', async (req, res) => {
 
     // 수량 컬럼: 값은 쓰지 않고 읽기 + 형광 표시만. 헤더 문자열로 탐색(열 위치 하드코딩 금지).
     const qtyIndex = headers.findIndex(h => String(h).trim() === QTY_COLUMN);
-    if (qtyIndex === -1) missingColumns.push(QTY_COLUMN);
+    if (qtyIndex === -1) {
+      // 조용히 넘어가면 수량이 곱해지지 않은 1개 단가가 정상값처럼 기록된다 → 소리 내서 알린다.
+      // (프론트도 응답의 missingColumns 를 화면에 띄운다)
+      missingColumns.push(QTY_COLUMN);
+      console.warn(`[batch-update-match] '${QTY_COLUMN}' 헤더 없음 — 매칭_매입에 수량을 곱하지 않고 1개 단가로 기록함`);
+    }
 
     const requests = [];
     let skippedCells = 0;
@@ -339,7 +356,7 @@ app.post('/api/batch-update-match', async (req, res) => {
       const r = Number(rowIndex);
       if (!master || !Number.isInteger(r) || r < 2) continue;
       const existingRow = grid[r - 1] || []; // grid[0]=header(row1), grid[r-1]=sheet row r
-      const qty = qtyIndex === -1 ? null : toNumberOrNull(existingRow[qtyIndex]);
+      const qty = qtyIndex === -1 ? null : parseQty(existingRow[qtyIndex]);
       const { values, flags } = computeFill(master, matchType, qty);
 
       // 행 경고: 대상 매입 업체면 행 전체(헤더 폭)를 주황으로.

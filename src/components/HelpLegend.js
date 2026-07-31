@@ -4,7 +4,7 @@ import React from 'react';
 // 색 원본 = backend/server.js 의 COLOR, 자세한 설명 = 시트_표시_규칙.md
 // 셋 중 하나를 고치면 나머지도 같이 고칠 것.
 const LEGEND = [
-  { color: '#FFD99E', label: '행 전체', desc: '매입 업체에 내셔널/내셔날 포함' },
+  { color: '#FFD99E', label: '행 전체', desc: '매입 업체에 내셔널/내셔날 포함 (채운 칸도 주황)' },
   { color: '#9EFF8C', label: '수량·매입', desc: '수량 2개 이상 (매입에 수량 곱함)' },
   { color: '#F5CCCC', label: '매입·매출', desc: '역마진 / 단종' },
   { color: '#FFF2B3', label: '매출', desc: '동공급가 미정' },
