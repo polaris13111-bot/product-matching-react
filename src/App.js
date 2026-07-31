@@ -3,6 +3,7 @@ import axios from 'axios';
 import './App.css';
 import ProductMatching from './components/ProductMatching';
 import SpreadsheetViewer from './components/SpreadsheetViewer';
+import HelpLegend from './components/HelpLegend';
 
 const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:5003';
 
@@ -169,6 +170,11 @@ function App() {
           >
             {clearing ? '삭제 중...' : '시트 초기화'}
           </button>
+        </div>
+
+        {/* 시트 색/계산 규칙 도움말 — 자세한 설명은 시트_표시_규칙.md */}
+        <div className="sidebar-section">
+          <HelpLegend />
         </div>
       </aside>
 

@@ -9,6 +9,7 @@ function ProductMatching({ productCount, unmatchedOrders, spreadsheetId, thresho
   const [bulkLoading, setBulkLoading] = useState(false);
   const [autoApplied, setAutoApplied] = useState({}); // { rowIndex: matchInfo } — 100% auto-matched (current run)
   const [sessionTotals, setSessionTotals] = useState({ exact: 0, model: 0 }); // cumulative across runs
+  const [missingColumns, setMissingColumns] = useState([]); // 시트에 없어서 건너뛴 컬럼
 
   const [manualSearch, setManualSearch] = useState('');
   const [manualMatches, setManualMatches] = useState([]);
@@ -60,10 +61,17 @@ function ProductMatching({ productCount, unmatchedOrders, spreadsheetId, thresho
         const exactNew = Object.values(autoMap).filter(m => m._matchType === '100%일치').length;
         const modelNew = Object.values(autoMap).filter(m => m._matchType === '모델명100%일치').length;
         setSessionTotals(prev => ({ exact: prev.exact + exactNew, model: prev.model + modelNew }));
-        await axios.post(`${API_URL}/api/batch-update-match`, {
-          spreadsheetId,
-          matches: autoBatch
-        }).catch(err => console.error('Auto-apply batch write error', err));
+        // 시트에 없는 컬럼은 조용히 건너뛰므로(특히 '수량' → 수량 안 곱해진 단가가 기록됨)
+        // 응답의 missingColumns 를 받아 화면에 띄운다.
+        try {
+          const writeRes = await axios.post(`${API_URL}/api/batch-update-match`, {
+            spreadsheetId,
+            matches: autoBatch
+          });
+          setMissingColumns(writeRes.data?.missingColumns ?? []);
+        } catch (err) {
+          console.error('Auto-apply batch write error', err);
+        }
         if (onRefresh) onRefresh();
       }
     } catch (err) {
@@ -102,6 +110,13 @@ function ProductMatching({ productCount, unmatchedOrders, spreadsheetId, thresho
 
   return (
     <div>
+      {missingColumns.length > 0 && (
+        <div className="sheet-warning">
+          시트에 <b>{missingColumns.join(', ')}</b> 컬럼이 없어 건너뛰었습니다.
+          {missingColumns.includes('수량') && ' 매칭_매입에 수량이 곱해지지 않고 1개 단가로 기록됐습니다.'}
+        </div>
+      )}
+
       {/* Stats */}
       <div className="stats-row">
         <div className="stat-box">
