@@ -89,26 +89,40 @@ const MANAGED_COLUMNS = [
   '매칭방식',
 ];
 
+// 수량 컬럼: 열 위치(N열 등)가 아니라 헤더 문자열로 찾는다 — 열이 끼어들어도 안 깨지게.
+const QTY_COLUMN = '수량';
+// 수량이 이 값 이상이면 형광 초록 표시 + 매칭_매입에 수량 곱셈
+const MULTI_QTY_MIN = 2;
+// 행 경고 대상 매입 업체: 업체명에 '내셔널'/'내셔날' 포함 (사장님 지시 2026-07-31).
+// 주의: '신영인터내셔널' 같은 무관한 업체도 걸린다. 현재는 해당 업체 상품이 0개라 무해.
+const WARN_SUPPLIER_RE = /내셔[널날]/;
+
 function toNumberOrNull(v) {
   if (v == null || v === '') return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
-// master(카탈로그 행) + matchType → 시트에 채울 값 + 경고 플래그
-function computeFill(master, matchType) {
+// master(카탈로그 행) + matchType + 시트 수량 → 시트에 채울 값 + 경고 플래그
+function computeFill(master, matchType, qty) {
   const shipping = toNumberOrNull(master.shipping_fee) ?? 0;
   const purchaseRaw = toNumberOrNull(master.purchase_normal);
   const saleRaw = toNumberOrNull(master.sale_c);
 
-  // 매칭_매입 ← purchase_normal + 배송비 (상시가 통일, 정수 V+)
-  const purchase = purchaseRaw == null ? null : Math.round(purchaseRaw + shipping);
-  // 매칭_매출 ← sale_c NULL 이면 빈칸, 아니면 sale_c + 배송비 (동공급가 배송포함)
+  const multiQty = qty != null && qty >= MULTI_QTY_MIN;
+
+  // 매칭_매입 ← (purchase_normal + 배송비) × 수량 (수량 2 이상일 때만 곱함)
+  const purchaseUnit = purchaseRaw == null ? null : purchaseRaw + shipping;
+  const purchase = purchaseUnit == null
+    ? null
+    : Math.round(multiQty ? purchaseUnit * qty : purchaseUnit);
+  // 매칭_매출 ← sale_c NULL 이면 빈칸, 아니면 sale_c + 배송비 (동공급가 배송포함). 수량 곱셈 없음.
   const sale = saleRaw == null ? null : Math.round(saleRaw + shipping);
 
   const discontinued = master.status === DISCONTINUED_STATUS;
   const reverseMargin = saleRaw != null && purchaseRaw != null && saleRaw < purchaseRaw;
   const saleNull = saleRaw == null;
+  const warnSupplier = WARN_SUPPLIER_RE.test(String(master.operator_name ?? ''));
 
   // 금액 컬럼(매칭_매입/매칭_매출)은 number|null 로 둔다 → 시트에 numberValue 로 기록
   // (텍스트로 넣으면 SUM 무시·사전식 정렬 파손). 나머지는 문자열.
@@ -123,24 +137,28 @@ function computeFill(master, matchType) {
     '매칭방식': matchType || '수동매칭',
   };
 
-  return { values, flags: { discontinued, reverseMargin, saleNull } };
+  return { values, flags: { discontinued, reverseMargin, saleNull, warnSupplier, multiQty } };
 }
 
 // 숫자로 기록할 컬럼 (SUM/정렬 유지)
 const NUMERIC_COLUMNS = new Set(['매칭_매입', '매칭_매출']);
 
 // 서식 색상 (Sheets API color: 0~1)
+// 여기를 고치면 화면 도움말(src/components/HelpLegend.js)과 시트_표시_규칙.md 도 같이 고칠 것.
 const COLOR = {
-  green: { red: 0.85, green: 0.94, blue: 0.83 }, // 연한 초록 = 새로 채움
-  red: { red: 0.96, green: 0.80, blue: 0.80 },   // 진한 빨강 경고
-  yellow: { red: 1.0, green: 0.95, blue: 0.70 }, // 노랑 경고
+  green: { red: 0.85, green: 0.94, blue: 0.83 },       // 연한 초록 = 새로 채움
+  greenHighlight: { red: 0.62, green: 1.0, blue: 0.55 }, // 형광 초록 = 수량 2 이상
+  red: { red: 0.96, green: 0.80, blue: 0.80 },         // 진한 빨강 경고
+  yellow: { red: 1.0, green: 0.95, blue: 0.70 },       // 노랑 경고
+  orange: { red: 1.0, green: 0.85, blue: 0.62 },       // 주황 = 행 경고(대상 매입 업체)
 };
 
-// 셀 배경색 결정. 경고(red>yellow) > 새로채움(green).
+// 셀 배경색 결정. 경고(red>yellow) > 수량형광 > 새로채움(green).
 function cellColor(colName, flags) {
   if (flags.reverseMargin && (colName === '매칭_매입' || colName === '매칭_매출')) return COLOR.red;
   if (flags.discontinued && colName === '매칭_탭') return COLOR.red;
   if (flags.saleNull && colName === '매칭_매출') return COLOR.yellow;
+  if (flags.multiQty && colName === '매칭_매입') return COLOR.greenHighlight; // 수량 곱해진 금액
   return COLOR.green; // 새로 채운 셀 표시
 }
 
@@ -298,9 +316,15 @@ app.post('/api/batch-update-match', async (req, res) => {
       else colIndex[name] = idx;
     }
 
+    // 수량 컬럼: 값은 쓰지 않고 읽기 + 형광 표시만. 헤더 문자열로 탐색(열 위치 하드코딩 금지).
+    const qtyIndex = headers.findIndex(h => String(h).trim() === QTY_COLUMN);
+    if (qtyIndex === -1) missingColumns.push(QTY_COLUMN);
+
     const requests = [];
     let skippedCells = 0;
     let coloredEmptyCells = 0;
+    let warnedRows = 0;
+    let qtyHighlightedCells = 0;
 
     // 셀 요청 헬퍼 (row/col 0-based)
     const cellAt = (row, col, fields, cell) => ({
@@ -315,7 +339,37 @@ app.post('/api/batch-update-match', async (req, res) => {
       const r = Number(rowIndex);
       if (!master || !Number.isInteger(r) || r < 2) continue;
       const existingRow = grid[r - 1] || []; // grid[0]=header(row1), grid[r-1]=sheet row r
-      const { values, flags } = computeFill(master, matchType);
+      const qty = qtyIndex === -1 ? null : toNumberOrNull(existingRow[qtyIndex]);
+      const { values, flags } = computeFill(master, matchType, qty);
+
+      // 행 경고: 대상 매입 업체면 행 전체(헤더 폭)를 주황으로.
+      // 개별 셀 색칠보다 먼저 넣어야 뒤의 경고색(빨강/노랑/형광초록)이 위에 덮인다.
+      // 주의: 이 틴트는 '기존 값 있으면 색도 보존' 원칙의 예외다(행 단위 경고라 폭이 행 전체).
+      // 호출부가 미매칭 행만 보내므로(App.js 미매칭 필터) 기존 경고색을 지울 일은 없다.
+      if (flags.warnSupplier && headers.length > 0) {
+        requests.push({
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: r - 1,
+              endRowIndex: r,
+              startColumnIndex: 0,
+              endColumnIndex: headers.length,
+            },
+            fields: 'userEnteredFormat.backgroundColor',
+            cell: { userEnteredFormat: { backgroundColor: COLOR.orange } },
+          },
+        });
+        warnedRows++;
+      }
+
+      // 수량 형광: 수량 셀은 값을 건드리지 않고 배경색만 칠한다(기존 수량 값 보존).
+      if (flags.multiQty && qtyIndex !== -1) {
+        requests.push(cellAt(r - 1, qtyIndex, 'userEnteredFormat.backgroundColor', {
+          userEnteredFormat: { backgroundColor: COLOR.greenHighlight },
+        }));
+        qtyHighlightedCells++;
+      }
 
       for (const name of MANAGED_COLUMNS) {
         const idx = colIndex[name];
@@ -366,6 +420,8 @@ app.post('/api/batch-update-match', async (req, res) => {
       updatedCount: matches.length,
       writtenCells: requests.length,
       coloredEmptyCells,
+      warnedRows,
+      qtyHighlightedCells,
       skippedCells,
       missingColumns,
     });

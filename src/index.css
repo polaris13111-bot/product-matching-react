@@ -725,6 +725,73 @@ input[type="range"]::-webkit-slider-thumb {
   margin-bottom: 0.3rem;
 }
 
+/* 시트 표시 규칙 도움말 (사이드바, 접힘 기본) */
+.help-legend {
+  font-size: 0.7rem;
+  color: #6b7280;
+  line-height: 1.45;
+}
+
+.help-legend > summary {
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  list-style: none;
+}
+
+.help-legend > summary::before {
+  content: '▸ ';
+}
+
+.help-legend[open] > summary::before {
+  content: '▾ ';
+}
+
+.help-legend > summary::-webkit-details-marker {
+  display: none;
+}
+
+.help-legend ul {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.help-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.help-legend li b {
+  color: #374151;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.help-legend-swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 3px;
+  border: 1px solid #d1d5db;
+  flex-shrink: 0;
+}
+
+.help-legend p {
+  margin: 0.5rem 0 0;
+}
+
+.help-legend-note {
+  display: block;
+  color: #9ca3af;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .sidebar {
