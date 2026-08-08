@@ -126,8 +126,13 @@ function computeFill(master, matchType, qty) {
   const purchase = purchaseUnit == null
     ? null
     : Math.round(multiQty ? purchaseUnit * qty : purchaseUnit);
-  // 매칭_매출 ← sale_c NULL 이면 빈칸, 아니면 sale_c + 배송비 (동공급가 배송포함). 수량 곱셈 없음.
-  const sale = saleRaw == null ? null : Math.round(saleRaw + shipping);
+  // 매칭_매출 ← sale_c NULL 이면 빈칸, 아니면 (sale_c + 배송비) × 수량.
+  // 매입만 곱하면 시트에서 매입만 몇 배로 뛰어 손해처럼 보이는 착시가 생긴다(현장 지적 2026-08-03).
+  // 매입과 같은 규칙으로 곱한다 — 곱하는 조건(수량 2 이상)도 같아야 둘이 어긋나지 않는다.
+  const saleUnit = saleRaw == null ? null : saleRaw + shipping;
+  const sale = saleUnit == null
+    ? null
+    : Math.round(multiQty ? saleUnit * qty : saleUnit);
 
   const discontinued = master.status === DISCONTINUED_STATUS;
   const reverseMargin = saleRaw != null && purchaseRaw != null && saleRaw < purchaseRaw;
@@ -168,7 +173,9 @@ function cellColor(colName, flags) {
   if (flags.reverseMargin && (colName === '매칭_매입' || colName === '매칭_매출')) return COLOR.red;
   if (flags.discontinued && colName === '매칭_탭') return COLOR.red;
   if (flags.saleNull && colName === '매칭_매출') return COLOR.yellow;
-  if (flags.multiQty && colName === '매칭_매입') return COLOR.greenHighlight; // 수량 곱해진 금액
+  // 수량이 곱해진 금액칸은 형광으로 표시한다. 매입·매출 둘 다 곱하므로 둘 다 칠한다
+  // (한쪽만 칠하면 "이 칸만 곱해졌다"는 거짓 신호가 된다).
+  if (flags.multiQty && (colName === '매칭_매입' || colName === '매칭_매출')) return COLOR.greenHighlight;
   // 경고 업체 행은 새로 채운 칸도 주황으로 — 안 그러면 채운 칸만 초록이 되어 행 경고가 끊긴다.
   if (flags.warnSupplier) return COLOR.orange;
   return COLOR.green; // 새로 채운 셀 표시
