@@ -334,6 +334,26 @@ app.post('/api/batch-update-match', async (req, res) => {
       return res.status(404).json({ error: `Sheet '${ORDER_SHEET}' not found` });
     }
 
+    // 요청의 master 를 그대로 믿지 않는다. 상품 id 로 서버 카탈로그를 다시 찾아
+    // 금액·업체·상태를 서버 값으로 덮는다. 두 가지를 동시에 막는다:
+    //   (1) 요청자가 보낸 가격이 그대로 시트에 적히는 것
+    //   (2) 브라우저가 오래 들고 있던 옛 가격(카탈로그 캐시·오래 열어둔 탭)이 적히는 것
+    // 옵션 문자열은 매칭 단계에서 만들어져 카탈로그 행에 없으므로 요청 것을 유지한다.
+    const catalogById = new Map();
+    try {
+      for (const row of await getCatalog()) catalogById.set(row.id, row);
+    } catch (err) {
+      // 카탈로그를 못 읽으면 검증 없이 진행하지 않는다 — 틀린 금액을 적느니 실패가 낫다.
+      console.error('[batch-update-match] 카탈로그 조회 실패:', err.message);
+      return res.status(503).json({ error: '상품 카탈로그를 읽을 수 없어 기록을 중단했습니다: ' + err.message });
+    }
+    let unverifiedMasters = 0;
+    const verifyMaster = (m) => {
+      const trusted = m && m.id != null ? catalogById.get(m.id) : null;
+      if (!trusted) { unverifiedMasters++; return m; } // 카탈로그에 없는 상품(삭제 등) — 요청 값 유지
+      return { ...trusted, 옵션: m.옵션 };
+    };
+
     // 헤더 + 대상 행들의 기존 값을 한 번에 읽는다(기존값 보존 판정용).
     const maxRow = matches.reduce((m, x) => Math.max(m, Number(x.rowIndex) || 0), 1);
     const gridRes = await sheetsClient.spreadsheets.values.get({
@@ -382,7 +402,7 @@ app.post('/api/batch-update-match', async (req, res) => {
       if (!master || !Number.isInteger(r) || r < 2) continue;
       const existingRow = grid[r - 1] || []; // grid[0]=header(row1), grid[r-1]=sheet row r
       const qty = qtyIndex === -1 ? null : parseQty(existingRow[qtyIndex]);
-      const { values, flags } = computeFill(master, matchType, qty);
+      const { values, flags } = computeFill(verifyMaster(master), matchType, qty);
 
       // 행 경고: 대상 매입 업체면 행 전체(헤더 폭)를 주황으로.
       // 개별 셀 색칠보다 먼저 넣어야 뒤의 경고색(빨강/노랑/형광초록)이 위에 덮인다.
@@ -461,6 +481,7 @@ app.post('/api/batch-update-match', async (req, res) => {
       success: true,
       updatedCount: matches.length,
       writtenCells: requests.length,
+      unverifiedMasters,
       coloredEmptyCells,
       warnedRows,
       qtyHighlightedCells,
