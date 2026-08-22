@@ -346,13 +346,15 @@ app.post('/api/batch-update-match', async (req, res) => {
       for (const row of await getCatalog({ force: true })) catalogById.set(row.id, row);
     } catch (err) {
       // 카탈로그를 못 읽으면 검증 없이 진행하지 않는다 — 틀린 금액을 적느니 실패가 낫다.
-      console.error('[batch-update-match] 카탈로그 조회 실패:', err.message);
-      return res.status(503).json({ error: '상품 카탈로그를 읽을 수 없어 기록을 중단했습니다: ' + err.message });
+      // 원인은 서버 로그에만 남긴다. DB 드라이버 오류엔 호스트·쿼리·설정이 섞여 나온다.
+      console.error('[batch-update-match] 카탈로그 조회 실패:', err);
+      return res.status(503).json({ error: '상품 목록을 읽을 수 없어 기록을 중단했습니다. 잠시 후 다시 시도해 주세요.' });
     }
     // 카탈로그에 없는 상품(삭제·id 불일치)은 아예 기록하지 않는다. 요청 값으로 되돌리면
     // 요청자가 보낸 금액이 그대로 시트에 적히는 경로가 다시 열린다.
     // 대신 건너뛴 상품을 응답에 담아 화면이 조용히 넘어가지 않게 한다.
     const unverifiedMasterIds = [];
+    let processedCount = 0; // 실제로 계산해 기록 대상이 된 행 수(요청 수가 아니다)
 
     // 헤더 + 대상 행들의 기존 값을 한 번에 읽는다(기존값 보존 판정용).
     const maxRow = matches.reduce((m, x) => Math.max(m, Number(x.rowIndex) || 0), 1);
@@ -410,6 +412,7 @@ app.post('/api/batch-update-match', async (req, res) => {
         continue;
       }
       const { values, flags } = computeFill(trusted, matchType, qty);
+      processedCount++;
 
       // 행 경고: 대상 매입 업체면 행 전체(헤더 폭)를 주황으로.
       // 개별 셀 색칠보다 먼저 넣어야 뒤의 경고색(빨강/노랑/형광초록)이 위에 덮인다.
@@ -486,7 +489,7 @@ app.post('/api/batch-update-match', async (req, res) => {
 
     res.json({
       success: true,
-      updatedCount: matches.length,
+      updatedCount: processedCount,   // 요청 수가 아니라 실제 처리한 행 수
       writtenCells: requests.length,
       unverifiedMasterIds,
       coloredEmptyCells,
