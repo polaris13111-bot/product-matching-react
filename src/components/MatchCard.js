@@ -42,10 +42,16 @@ function MatchCard({ match, index, spreadsheetId, rowIndex, orderName, onMatched
     setMatching(true);
     try {
       // 단일 항목도 batch 경로로 기록 (헤더경합/신규컬럼 append 없음, 서식경고 적용)
-      await axios.post(`${API_URL}/api/batch-update-match`, {
+      const res = await axios.post(`${API_URL}/api/batch-update-match`, {
         spreadsheetId,
         matches: [{ rowIndex, master: match, matchType: '수동매칭' }]
       });
+      // 서버가 상품을 못 찾아 건너뛰었으면 성공으로 표시하면 안 된다.
+      // 시트엔 아무것도 안 적혔는데 화면만 ✓ 가 되면 그게 조용한 사고다.
+      if ((res.data?.unverifiedMasterIds ?? []).length > 0) {
+        alert('이 상품을 상품 목록에서 찾지 못해 시트에 기록하지 않았습니다. 상품이 삭제됐거나 목록이 바뀐 경우입니다. 새로고침 후 다시 시도해 주세요.');
+        return;
+      }
       setMatched(true);
       if (onMatched) onMatched();
     } catch (err) {
