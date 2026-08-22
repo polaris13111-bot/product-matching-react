@@ -19,13 +19,14 @@ function MatchCard({ match, index, spreadsheetId, rowIndex, orderName, onMatched
   const imageUrl = match.representative_image_url;
   const discontinued = match.status === 'discontinued';
 
-  // 매입가 기준은 서버(backend/server.js computeFill)와 같은 규칙을 따라야 한다.
-  // 카드엔 상시가 뜨는데 시트엔 기획가가 적히면 화면이 거짓말을 하게 된다.
-  const isNational = /내셔[널날]/.test(String(match.operator_name ?? ''));
-  const purchase =
-    isNational && match.purchase_planned != null ? match.purchase_planned : match.purchase_normal;
-  const purchaseLabel = isNational
-    ? (match.purchase_planned != null ? '매입(기획)' : '매입(상시·기획가없음)')
+  // 매입가 기준은 **여기서 판별하지 않는다.** backend/pricing.js 가 단독으로 정해
+  // 카탈로그 행에 박아 내려보낸 값(purchase_effective / purchase_basis)만 그대로 보여준다.
+  // 예전엔 이 카드가 업체명 정규식으로 따로 판별했다 — 규칙이 두 벌이라
+  // 카드엔 상시가 뜨는데 시트엔 기획가가 적히는(화면이 거짓말하는) 위험이 있었다.
+  const purchase = match.purchase_effective ?? null;
+  const purchaseLabel =
+    match.purchase_basis === '기획' ? '매입(기획)'
+    : match.purchase_fell_back ? '매입(상시·기획가없음)'
     : '매입';
 
   const reverseMargin =

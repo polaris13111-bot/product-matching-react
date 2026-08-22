@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { findMatchingProducts, autoMatchProducts, DISCONTINUED_STATUS } = require('./matcher');
 const { getCatalog } = require('./db');
+const { toNumberOrNull, readPurchaseDecision } = require('./pricing');
 require('dotenv').config();
 
 // 주문/매칭결과가 있는 Google Sheet 의 탭 이름. 하드코딩 제거 → env 로 조정 가능.
@@ -93,23 +94,17 @@ const MANAGED_COLUMNS = [
 const QTY_COLUMN = '수량';
 // 수량이 이 값 이상이면 형광 초록 표시 + 매칭_매입에 수량 곱셈
 const MULTI_QTY_MIN = 2;
-// 내셔널 계열 업체: 업체명에 '내셔널'/'내셔날' 포함 (사장님 지시 2026-07-31).
-// 이 하나의 정의가 두 가지를 동시에 결정한다 — 행 경고 + 매입가 기준.
-// 정의를 둘로 쪼개면 "어느 쪽이 진짜 내셔널이냐"가 생기므로 하나로 유지한다.
-// 주의: '신영인터내셔널' 같은 무관한 업체도 걸린다. 현재는 해당 업체 상품이 0개라 무해.
+// 🟧 행 경고(주황) 전용 업체 판정 — **가격 기준이 아니다.**
+//    업체명에 '내셔널'/'내셔날'이 들어가면 전부 경고 (사장님 지시 2026-07-31:
+//    "내셔널 들어간 업체들 모두다" — 넓게 잡는 쪽을 명시적으로 고르셨다).
+//    '신영인터내셔널'·'HS인터내셔널' 같은 무관한 업체도 걸리지만, 경고는 값을 바꾸지 않고
+//    사람 눈을 한 번 더 붙잡을 뿐이라 넓어도 손해가 없다 — 그래서 좁히지 않는다.
+//
+//    ⛔ 이 정규식을 매입가 결정에 쓰지 마라. 가격 기준은 훨씬 좁고(사장님 지시 2026-08-08
+//       "내셔널만"), backend/pricing.js 의 정확한 이름 집합이 단독으로 정한다.
+//       예전엔 이 하나를 둘 다에 썼고, 그래서 '신영인터내셔널' 상품이 생기면 조용히
+//       기획가가 적용되는 결함이 있었다(2026-08-08 적발). 다시 합치지 마라.
 const WARN_SUPPLIER_RE = /내셔[널날]/;
-
-// 📌 내셔널 계열은 매입가 기본이 '상시'가 아니라 '기획 입고가'다 (사장님 지시 2026-08-08).
-//    내셔널은 상시·기획·특판 세 가격을 다 갖고 있는데, 상시가 제일 비싸서 그대로 쓰면
-//    직원이 매번 손으로 고쳐야 했다. 그래서 기획을 기본으로 못박는다.
-//    (2026-08-08 실측: 내셔널 상품 63개 전부 기획가가 채워져 있다.)
-//    기획가가 없으면 상시로 대체하되 그 칸을 파랑으로 칠해 대체 사실을 숨기지 않는다.
-
-function toNumberOrNull(v) {
-  if (v == null || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
 
 // 시트 수량 파싱. 시트는 FORMATTED_VALUE 로 읽으므로 '1,200'·' 2 ' 처럼
 // 천단위 콤마와 공백이 섞여 들어온다 → Number() 가 그대로면 NaN.
@@ -124,17 +119,17 @@ function parseQty(v) {
 // master(카탈로그 행) + matchType + 시트 수량 → 시트에 채울 값 + 경고 플래그
 function computeFill(master, matchType, qty) {
   const shipping = toNumberOrNull(master.shipping_fee) ?? 0;
-  const normalRaw = toNumberOrNull(master.purchase_normal);
-  const plannedRaw = toNumberOrNull(master.purchase_planned);
   const saleRaw = toNumberOrNull(master.sale_c);
 
-  // 매입가 기준 선택: 내셔널 계열이면 기획, 그 외에는 상시.
-  const isNational = WARN_SUPPLIER_RE.test(String(master.operator_name ?? ''));
-  const wantPlanned = isNational;
-  // 기획을 쓰기로 했는데 값이 없으면 상시로 대체한다(대체 사실은 플래그로 남긴다).
-  const purchaseRaw = wantPlanned && plannedRaw != null ? plannedRaw : normalRaw;
-  const purchaseBasis = wantPlanned && plannedRaw != null ? '기획' : '상시';
-  const purchaseFellBack = wantPlanned && plannedRaw == null && normalRaw != null;
+  // 매입가 기준은 여기서 판별하지 않는다 — backend/pricing.js 가 단독으로 정하고,
+  // 카탈로그 행(db.js)에 purchase_effective / purchase_basis / purchase_fell_back 로
+  // 박혀서 내려온다. 화면 카드도 같은 필드를 읽으므로 시트와 화면이 어긋날 수 없다.
+  // (행에 안 붙어 있으면 readPurchaseDecision 이 같은 규칙으로 정해 준다.)
+  const {
+    purchase: purchaseRaw,
+    basis: purchaseBasis,
+    fellBack: purchaseFellBack,
+  } = readPurchaseDecision(master);
 
   const multiQty = qty != null && qty >= MULTI_QTY_MIN;
 
@@ -156,7 +151,8 @@ function computeFill(master, matchType, qty) {
   // 상시로 판정하면 기획가로 적힌 금액과 빨강 경고가 어긋난다.
   const reverseMargin = saleRaw != null && purchaseRaw != null && saleRaw < purchaseRaw;
   const saleNull = saleRaw == null;
-  const warnSupplier = isNational;
+  // 행 경고는 가격 기준과 **다른 잣대**다(넓은 정규식). 위 WARN_SUPPLIER_RE 주석 참고.
+  const warnSupplier = WARN_SUPPLIER_RE.test(String(master.operator_name ?? ''));
 
   // 금액 컬럼(매칭_매입/매칭_매출)은 number|null 로 둔다 → 시트에 numberValue 로 기록
   // (텍스트로 넣으면 SUM 무시·사전식 정렬 파손). 나머지는 문자열.
@@ -184,7 +180,7 @@ const COLOR = {
   greenHighlight: { red: 0.62, green: 1.0, blue: 0.55 }, // 형광 초록 = 수량 2 이상
   red: { red: 0.96, green: 0.80, blue: 0.80 },         // 진한 빨강 경고
   yellow: { red: 1.0, green: 0.95, blue: 0.70 },       // 노랑 경고
-  orange: { red: 1.0, green: 0.85, blue: 0.62 },       // 주황 = 행 경고(내셔널 계열)
+  orange: { red: 1.0, green: 0.85, blue: 0.62 },       // 주황 = 행 경고(업체명에 내셔널/내셔날)
   blue: { red: 0.72, green: 0.85, blue: 1.0 },         // 파랑 = 기획가가 없어 상시로 대체
 };
 
@@ -196,7 +192,7 @@ function cellColor(colName, flags) {
   // 수량이 곱해진 금액칸은 형광으로 표시한다. 매입·매출 둘 다 곱하므로 둘 다 칠한다
   // (한쪽만 칠하면 "이 칸만 곱해졌다"는 거짓 신호가 된다).
   if (flags.multiQty && (colName === '매칭_매입' || colName === '매칭_매출')) return COLOR.greenHighlight;
-  // 내셔널인데 기획가가 없어 상시로 대체한 경우 — 그 사실을 숨기지 않고 매입칸을 파랑으로.
+  // 기획가 기준 업체인데 기획가가 없어 상시로 대체한 경우 — 그 사실을 숨기지 않고 매입칸을 파랑으로.
   if (flags.purchaseFellBack && colName === '매칭_매입') return COLOR.blue;
   // 경고 업체 행은 새로 채운 칸도 주황으로 — 안 그러면 채운 칸만 초록이 되어 행 경고가 끊긴다.
   if (flags.warnSupplier) return COLOR.orange;

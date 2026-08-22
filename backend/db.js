@@ -16,6 +16,7 @@
 //    (2026-07-08 DB조사팀 확정: pmp.master_id / pv.master_id / pm.operator_id→companies.id)
 
 const { Pool } = require('pg');
+const { attachPurchaseBasis } = require('./pricing');
 
 // ── 상품 마스터 조회 SQL (확정 컬럼) ──────────────────────────
 // 대표이미지 = common.product_images 중 image_type='representative' 을
@@ -26,8 +27,10 @@ const { Pool } = require('pg');
 //    row.sale_c 필드명은 불변 — 값 출처만 신 컬럼으로 옮긴다.
 //
 // 📦 매입가는 두 컬럼을 같이 가져온다. 상시(purchase_normal)가 기본이고,
-//    내셔널 계열 업체만 기획(purchase_planned)을 기본으로 쓴다(server.js 의 computeFill).
-//    어느 쪽을 쓸지는 서버가 정한다 — SQL 은 판단하지 않고 둘 다 넘긴다.
+//    특정 업체만 기획(purchase_planned)을 기본으로 쓴다.
+//    어느 쪽을 쓸지는 **SQL 이 판단하지 않는다** — 둘 다 넘기고, 판단은 backend/pricing.js 가
+//    한 곳에서 한다. 그 결과는 아래 loadProductMasters 에서 행에 박아 내려보낸다
+//    (purchase_effective / purchase_basis / purchase_fell_back).
 const PRODUCT_QUERY = `
 SELECT pm.id, pm.name, pm.name_raw,
        COALESCE(oc.name, pm.notes->>'operator_raw') AS operator_name,
@@ -95,6 +98,10 @@ function getPool() {
 // ── 로더 ──────────────────────────────────────────────────────
 async function loadProductMasters() {
   const { rows } = await getPool().query(PRODUCT_QUERY);
+  // 매입가 기준 결정을 여기서 한 번만 하고 행에 박아 내려보낸다.
+  // 이 행이 matcher → /api/* → 프론트 카드 → 다시 서버(computeFill) 로 흐르므로
+  // 화면과 시트가 반드시 같은 매입가를 본다. (규칙 본체 = backend/pricing.js)
+  for (const row of rows) attachPurchaseBasis(row);
   return rows;
 }
 

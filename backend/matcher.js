@@ -2,7 +2,10 @@
 //
 // 입력 상품(product)은 nf_main 카탈로그 행:
 //   { id, name, name_raw, operator_name, model_code, status,
-//     purchase_normal, sale_c, shipping_fee, 옵션 }
+//     purchase_normal, purchase_planned, sale_c, shipping_fee, 옵션,
+//     purchase_effective, purchase_basis, purchase_fell_back }
+// 뒤 세 개는 db.js 가 backend/pricing.js 로 결정해 붙여 둔 '어느 매입가를 쓸지'다.
+// 매칭은 이 필드들을 보지 않지만, spread 로 그대로 실어 보내야 화면·시트가 같은 값을 본다.
 // 매칭에 쓰는 상품명 = product.name. id 는 올바른 행을 집는 데만 쓰고 시트엔 저장하지 않는다.
 
 // 단종 판정값 (2026-07-08 DB조사 확정). status 다른 값: active/out_of_stock/hidden 은 단종 아님.
