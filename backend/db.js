@@ -24,11 +24,15 @@ const { Pool } = require('pg');
 // 🥉 동공급가 = pmp.bronze_medal_supply (레지스트라 가격 컬럼 물리 개명: 구 sale_c → 신
 //    bronze_medal_supply). `AS sale_c` 별칭으로 하류(matcher.js/server.js/MatchCard.js)의
 //    row.sale_c 필드명은 불변 — 값 출처만 신 컬럼으로 옮긴다.
+//
+// 📦 매입가는 두 컬럼을 같이 가져온다. 상시(purchase_normal)가 기본이고,
+//    내셔널 계열 업체만 기획(purchase_planned)을 기본으로 쓴다(server.js 의 computeFill).
+//    어느 쪽을 쓸지는 서버가 정한다 — SQL 은 판단하지 않고 둘 다 넘긴다.
 const PRODUCT_QUERY = `
 SELECT pm.id, pm.name, pm.name_raw,
        COALESCE(oc.name, pm.notes->>'operator_raw') AS operator_name,
        pm.model_code, pm.status,
-       pmp.purchase_normal, pmp.bronze_medal_supply AS sale_c, pmp.shipping_fee,
+       pmp.purchase_normal, pmp.purchase_planned, pmp.bronze_medal_supply AS sale_c, pmp.shipping_fee,
        img.url AS representative_image_url
 FROM common.product_masters pm
 LEFT JOIN common.companies oc ON oc.id = pm.operator_id

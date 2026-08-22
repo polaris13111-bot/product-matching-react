@@ -18,9 +18,19 @@ function MatchCard({ match, index, spreadsheetId, rowIndex, orderName, onMatched
 
   const imageUrl = match.representative_image_url;
   const discontinued = match.status === 'discontinued';
+
+  // 매입가 기준은 서버(backend/server.js computeFill)와 같은 규칙을 따라야 한다.
+  // 카드엔 상시가 뜨는데 시트엔 기획가가 적히면 화면이 거짓말을 하게 된다.
+  const isNational = /내셔[널날]/.test(String(match.operator_name ?? ''));
+  const purchase =
+    isNational && match.purchase_planned != null ? match.purchase_planned : match.purchase_normal;
+  const purchaseLabel = isNational
+    ? (match.purchase_planned != null ? '매입(기획)' : '매입(상시·기획가없음)')
+    : '매입';
+
   const reverseMargin =
     match.sale_c != null && match.sale_c !== '' &&
-    match.purchase_normal != null && Number(match.sale_c) < Number(match.purchase_normal);
+    purchase != null && Number(match.sale_c) < Number(purchase);
 
   const handleMatch = async () => {
     if (!spreadsheetId || !rowIndex) {
@@ -84,7 +94,7 @@ function MatchCard({ match, index, spreadsheetId, rowIndex, orderName, onMatched
         </div>
         <div className="details">
           {match.operator_name && <span>업체: {match.operator_name}</span>}
-          {match.purchase_normal != null && <span>매입: {match.purchase_normal}</span>}
+          {purchase != null && <span>{purchaseLabel}: {purchase}</span>}
           {match.sale_c != null && match.sale_c !== '' && (
             <span style={reverseMargin ? { color: '#dc2626', fontWeight: 600 } : undefined}>
               매출: {match.sale_c}{reverseMargin ? ' (역마진)' : ''}
