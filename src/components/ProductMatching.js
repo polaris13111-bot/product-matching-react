@@ -10,6 +10,7 @@ function ProductMatching({ productCount, unmatchedOrders, spreadsheetId, thresho
   const [autoApplied, setAutoApplied] = useState({}); // { rowIndex: matchInfo } — 100% auto-matched (current run)
   const [sessionTotals, setSessionTotals] = useState({ exact: 0, model: 0 }); // cumulative across runs
   const [missingColumns, setMissingColumns] = useState([]); // 시트에 없어서 건너뛴 컬럼
+  const [unverifiedIds, setUnverifiedIds] = useState([]); // 서버 카탈로그에 없어 기록을 건너뛴 상품
 
   const [manualSearch, setManualSearch] = useState('');
   const [manualMatches, setManualMatches] = useState([]);
@@ -69,6 +70,7 @@ function ProductMatching({ productCount, unmatchedOrders, spreadsheetId, thresho
             matches: autoBatch
           });
           setMissingColumns(writeRes.data?.missingColumns ?? []);
+          setUnverifiedIds(writeRes.data?.unverifiedMasterIds ?? []);
         } catch (err) {
           console.error('Auto-apply batch write error', err);
         }
@@ -110,6 +112,13 @@ function ProductMatching({ productCount, unmatchedOrders, spreadsheetId, thresho
 
   return (
     <div>
+      {unverifiedIds.length > 0 && (
+        <div className="sheet-warning">
+          <b>{unverifiedIds.length}건</b>은 상품 목록에서 찾지 못해 시트에 기록하지 않았습니다.
+          {' '}상품이 삭제됐거나 목록이 바뀐 경우입니다. (상품번호 {unverifiedIds.join(', ')})
+        </div>
+      )}
+
       {missingColumns.length > 0 && (
         <div className="sheet-warning">
           시트에 <b>{missingColumns.join(', ')}</b> 컬럼이 없어 건너뛰었습니다.
