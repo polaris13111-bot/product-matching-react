@@ -18,9 +18,20 @@ function MatchCard({ match, index, spreadsheetId, rowIndex, orderName, onMatched
 
   const imageUrl = match.representative_image_url;
   const discontinued = match.status === 'discontinued';
+
+  // 매입가 기준은 **여기서 판별하지 않는다.** backend/pricing.js 가 단독으로 정해
+  // 카탈로그 행에 박아 내려보낸 값(purchase_effective / purchase_basis)만 그대로 보여준다.
+  // 예전엔 이 카드가 업체명 정규식으로 따로 판별했다 — 규칙이 두 벌이라
+  // 카드엔 상시가 뜨는데 시트엔 기획가가 적히는(화면이 거짓말하는) 위험이 있었다.
+  const purchase = match.purchase_effective ?? null;
+  const purchaseLabel =
+    match.purchase_basis === '기획' ? '매입(기획)'
+    : match.purchase_fell_back ? '매입(상시·기획가없음)'
+    : '매입';
+
   const reverseMargin =
     match.sale_c != null && match.sale_c !== '' &&
-    match.purchase_normal != null && Number(match.sale_c) < Number(match.purchase_normal);
+    purchase != null && Number(match.sale_c) < Number(purchase);
 
   const handleMatch = async () => {
     if (!spreadsheetId || !rowIndex) {
@@ -31,10 +42,16 @@ function MatchCard({ match, index, spreadsheetId, rowIndex, orderName, onMatched
     setMatching(true);
     try {
       // 단일 항목도 batch 경로로 기록 (헤더경합/신규컬럼 append 없음, 서식경고 적용)
-      await axios.post(`${API_URL}/api/batch-update-match`, {
+      const res = await axios.post(`${API_URL}/api/batch-update-match`, {
         spreadsheetId,
         matches: [{ rowIndex, master: match, matchType: '수동매칭' }]
       });
+      // 서버가 상품을 못 찾아 건너뛰었으면 성공으로 표시하면 안 된다.
+      // 시트엔 아무것도 안 적혔는데 화면만 ✓ 가 되면 그게 조용한 사고다.
+      if ((res.data?.unverifiedMasterIds ?? []).length > 0) {
+        alert('이 상품을 상품 목록에서 찾지 못해 시트에 기록하지 않았습니다. 상품이 삭제됐거나 목록이 바뀐 경우입니다. 새로고침 후 다시 시도해 주세요.');
+        return;
+      }
       setMatched(true);
       if (onMatched) onMatched();
     } catch (err) {
@@ -84,7 +101,7 @@ function MatchCard({ match, index, spreadsheetId, rowIndex, orderName, onMatched
         </div>
         <div className="details">
           {match.operator_name && <span>업체: {match.operator_name}</span>}
-          {match.purchase_normal != null && <span>매입: {match.purchase_normal}</span>}
+          {purchase != null && <span>{purchaseLabel}: {purchase}</span>}
           {match.sale_c != null && match.sale_c !== '' && (
             <span style={reverseMargin ? { color: '#dc2626', fontWeight: 600 } : undefined}>
               매출: {match.sale_c}{reverseMargin ? ' (역마진)' : ''}
